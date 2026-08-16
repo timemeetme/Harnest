@@ -1,0 +1,107 @@
+name: Build Android
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'iosApp/**'
+      - 'harmonyApp/**'
+      - '**/*.md'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'iosApp/**'
+      - 'harmonyApp/**'
+      - '**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Android APK
+    runs-on: ubuntu-latest
+
+    env:
+      JAVA_VERSION: '17'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          server-id: gradle
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/build-cache-1
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/*.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Decode signing keystore (if available)
+        id: sign
+        if: env.SIGNING_KEY_BASE64 != ''
+        env:
+          SIGNING_KEY_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$SIGNING_KEY_BASE64" | base64 -d > android-release-key.jks
+          {
+            echo "ANDROID_KEYSTORE_PATH=$(pwd)/android-release-key.jks"
+            echo "ANDROID_KEYSTORE_PASSWORD=$SIGNING_STORE_PASSWORD"
+            echo "ANDROID_KEY_ALIAS=$SIGNING_KEY_ALIAS"
+            echo "ANDROID_KEY_PASSWORD=$SIGNING_KEY_PASSWORD"
+          } >> $GITHUB_ENV
+
+      - name: Assemble Release APK
+        run: ./gradlew :androidApp:assembleRelease --no-daemon --stacktrace
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ env.ANDROID_KEYSTORE_PATH }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ env.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ env.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ env.ANDROID_KEY_PASSWORD }}
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-${{ github.sha }}
+          path: androidApp/build/outputs/apk/release/*.apk
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload mapping (if exists)
+        uses: actions/upload-artifact@v4
+        if: hashFiles('androidApp/build/outputs/mapping/release/mapping.txt') != ''
+        with:
+          name: android-mapping-${{ github.sha }}
+          path: androidApp/build/outputs/mapping/release/mapping.txt
+          retention-days: 30
+          if-no-files-found: ignore

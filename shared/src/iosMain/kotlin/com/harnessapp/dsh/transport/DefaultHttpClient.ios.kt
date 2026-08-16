@@ -1,0 +1,12 @@
+package com.harnessapp.dsh.transport
+
+import io.ktor.client.*
+import io.ktor.client.engine.darwin.*
+import io.ktor.client.plugins.websocket.*
+import io.ktor.client.plugins.contentnegotiation.*
+import io.ktor.serialization.kotlinx.json.*
+
+actual fun defaultHttpClient(): HttpClient = HttpClient(Darwin) {
+    install(WebSockets)
+    install(ContentNegotiation) { json(dshJson) }
+}

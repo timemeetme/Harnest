@@ -1,0 +1,135 @@
+name: Build HarmonyOS
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'androidApp/**'
+      - 'iosApp/**'
+      - '**/*.md'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'androidApp/**'
+      - 'iosApp/**'
+      - '**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-harmony-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: HarmonyOS HAP
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Check if Harmony project exists
+        id: preflight
+        run: |
+          HARMONY_DIR="harmonyApp"
+          if [ ! -d "$HARMONY_DIR" ]; then
+            echo "harmony_dir_present=false" >> $GITHUB_OUTPUT
+            echo "::warning::harmonyApp directory not found — skipping Harmony build."
+            exit 0
+          fi
+
+          HVIGORW="$HARMONY_DIR/hvigorw"
+          if [ -f "$HVIGORW" ]; then
+            echo "hvigorw_present=true" >> $GITHUB_OUTPUT
+          else
+            echo "hvigorw_present=false" >> $GITHUB_OUTPUT
+            echo "::warning::hvigorw not found in harmonyApp — skipping Harmony build."
+            exit 0
+          fi
+
+          if [ -f "$HARMONY_DIR/package.json" ]; then
+            echo "package_json_present=true" >> $GITHUB_OUTPUT
+          else
+            echo "package_json_present=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "harmony_dir_present=true" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js 18
+        if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: npm
+          cache-dependency-path: harmonyApp/package-lock.json
+
+      - name: Setup JDK 17 (KMP shared module)
+        if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+
+      - name: Cache Gradle (KMP)
+        if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/build-cache-1
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/*.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Make wrappers executable
+        if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
+        run: |
+          chmod +x gradlew 2>/dev/null || true
+          chmod +x harmonyApp/hvigorw 2>/dev/null || true
+
+      - name: Install Harmony dependencies
+        if: |
+          steps.preflight.outputs.harmony_dir_present == 'true' &&
+          steps.preflight.outputs.hvigorw_present == 'true' &&
+          steps.preflight.outputs.package_json_present == 'true'
+        working-directory: harmonyApp
+        run: npm ci || npm install
+
+      - name: Install DevEco CLI (hvigor)
+        if: |
+          steps.preflight.outputs.harmony_dir_present == 'true' &&
+          steps.preflight.outputs.hvigorw_present == 'true' &&
+          steps.preflight.outputs.package_json_present != 'true'
+        run: |
+          npm install -g @ohos/hvigor-ohos-plugin
+
+      - name: Assemble Shared (JVM + Android targets for Harmony interop)
+        if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
+        run: ./gradlew :shared:compileKotlinAndroid --no-daemon || true
+
+      - name: Build HarmonyOS HAP
+        if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
+        working-directory: harmonyApp
+        run: |
+          ./hvigorw --mode module \
+            -p module=entry@default \
+            assembleHap \
+            --no-daemon \
+            --stacktrace
+
+      - name: Upload HAP artifact
+        if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: harmony-hap-${{ github.sha }}
+          path: harmonyApp/**/build/default/outputs/default/*.hap
+          retention-days: 7
+          if-no-files-found: warn

@@ -1,0 +1,88 @@
+# HarnessApp iOS — xcodegen 工程
+#
+# 构建步骤（macOS 主机）：
+#   1) cd 仓库根目录，产出共享 XCFramework：
+#      ./gradlew :shared:assembleSharedDebugXCFramework
+#      ./gradlew :shared:assembleSharedReleaseXCFramework
+#   2) cd iosApp && xcodegen generate
+#   3) open HarnessApp.xcodeproj，Cmd+R
+#
+# active/ 软链机制（见 preActions）：
+#   Debug   → XCFrameworks/debug/shared.xcframework
+#   Release → XCFrameworks/release/shared.xcframework
+
+name: HarnessApp
+options:
+  bundleIdPrefix: com.harnessapp
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+targets:
+  HarnessApp:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: DSH Mobile
+        CFBundleIdentifier: com.harnessapp.ios
+        CFBundleShortVersionString: "0.1.0"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.harnessapp.ios
+        PRODUCT_NAME: HarnessApp
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/shared-bridge.h
+    dependencies:
+      - framework: ../shared/build/XCFrameworks/active/shared.xcframework
+        embed: true
+    buildPhases:
+      preActions:
+        - name: Prepare Shared XCFramework
+          script: |
+            set -e
+            JAVA_HOME="${JAVA_HOME:-}"
+            if [ -z "$JAVA_HOME" ] && command -v /usr/libexec/java_home >/dev/null 2>&1; then
+              JAVA_HOME=$(/usr/libexec/java_home -v 17 2>/dev/null) || true
+            fi
+            if [ -n "$JAVA_HOME" ]; then export JAVA_HOME; export PATH="$JAVA_HOME/bin:$PATH"; fi
+            CFG_LOWER=$(echo "$CONFIGURATION" | tr '[:upper:]' '[:lower:]')
+            FW_SRC="$SRCROOT/../shared/build/XCFrameworks/$CFG_LOWER/shared.xcframework"
+            FW_ACTIVE_DIR="$SRCROOT/../shared/build/XCFrameworks/active"
+            if [ ! -d "$FW_SRC" ]; then
+              echo "[$CFG_LOWER] shared.xcframework not found, building via gradle…"
+              cd "$SRCROOT/.."
+              TASK=":shared:assembleShared${CFG_LOWER^}XCFramework"
+              ./gradlew "$TASK" || gradle "$TASK"
+            fi
+            rm -rf "$FW_ACTIVE_DIR"; mkdir -p "$FW_ACTIVE_DIR"
+            ln -s "$FW_SRC" "$FW_ACTIVE_DIR/shared.xcframework"
+            echo "[$CFG_LOWER] → active/"
+schemes:
+  HarnessApp:
+    build:
+      targets:
+        HarnessApp: all
+    run:
+      config: Debug

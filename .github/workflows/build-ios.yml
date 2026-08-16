@@ -1,0 +1,158 @@
+name: Build iOS
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'androidApp/**'
+      - 'harmonyApp/**'
+      - '**/*.md'
+  pull_request:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'androidApp/**'
+      - 'harmonyApp/**'
+      - '**/*.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: iOS IPA
+    runs-on: macos-latest-xlarge
+
+    env:
+      JAVA_VERSION: '17'
+      XCODE_SCHEME: 'HarnessApp'
+      BUNDLE_ID: 'com.harnessapp.ios'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+
+      - name: Cache Gradle (KMP)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/build-cache-1
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/*.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Assemble Shared XCFramework (Release)
+        run: ./gradlew :shared:assembleSharedReleaseXCFramework --no-daemon --stacktrace
+
+      - name: Verify XCFramework output
+        run: |
+          if [ -d "shared/build/XCFrameworks/release/shared.xcframework" ]; then
+            echo "XCFramework found at shared/build/XCFrameworks/release/shared.xcframework"
+            ls -la shared/build/XCFrameworks/release/
+          else
+            echo "ERROR: XCFramework not produced — check Gradle task output"
+            exit 1
+          fi
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: iosApp
+        run: xcodegen generate
+
+      - name: Decode provisioning credentials (if available)
+        id: provision
+        continue-on-error: true
+        env:
+          APPLE_TEAM_ID: ${{ secrets.IOS_TEAM_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.IOS_APP_SPECIFIC_PASSWORD }}
+          APPLE_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          if [ -n "$APPLE_PROVISIONING_PROFILE_BASE64" ]; then
+            echo "$APPLE_PROVISIONING_PROFILE_BASE64" | base64 -d > profile.mobileprovision
+            cp profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+            echo "profile_installed=true" >> $GITHUB_OUTPUT
+          else
+            echo "profile_installed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Xcode project (Generic iOS Device)
+        working-directory: iosApp
+        run: |
+          xcodebuild build \
+            -project HarnessApp.xcodeproj \
+            -scheme ${{ env.XCODE_SCHEME }} \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Archive
+        working-directory: iosApp
+        run: |
+          xcodebuild archive \
+            -project HarnessApp.xcodeproj \
+            -scheme ${{ env.XCODE_SCHEME }} \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            -archivePath build/HarnessApp.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Export IPA
+        working-directory: iosApp
+        run: |
+          cp ../iosApp/ExportOptions.plist ExportOptions.plist 2>/dev/null || true
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/HarnessApp.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist ExportOptions.plist \
+            || echo "Export failed (signing may be missing) — artifact is still available via upload of .app"
+
+      - name: Upload XCFramework
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcframework-${{ github.sha }}
+          path: shared/build/XCFrameworks/release/shared.xcframework
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        if: hashFiles('iosApp/build/export/*.ipa') != ''
+        with:
+          name: ios-ipa-${{ github.sha }}
+          path: iosApp/build/export/*.ipa
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload .app bundle (fallback)
+        uses: actions/upload-artifact@v4
+        if: hashFiles('iosApp/build/export/*.ipa') == '' && hashFiles('iosApp/build/Release-iphoneos/*.app') != ''
+        with:
+          name: ios-app-${{ github.sha }}
+          path: iosApp/build/Release-iphoneos/*.app
+          retention-days: 7
+          if-no-files-found: error

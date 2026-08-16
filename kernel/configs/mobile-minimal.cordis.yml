@@ -1,0 +1,53 @@
+- id: bash-sandbox
+  disabled: true
+
+- id: pwsh-sandbox
+  disabled: true
+
+- id: tool-bash
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
+- id: session-telemetry-otel
+  disabled: true
+
+- id: skill-badge
+  disabled: true
+
+- id: tool-subagent-fork
+  disabled: true
+
+- id: tool-subagent-report
+  disabled: true
+
+- id: workflow-worker-thread
+  disabled: true
+
+- id: tool-workflow
+  disabled: true
+
+- id: tool-ralph
+  disabled: true
+
+- id: tool-str-replace-editor
+  disabled: true
+
+- id: repeat-tool-reminder
+  disabled: true
+
+- id: commands
+  disabled: true
+
+- id: command-feedback
+  disabled: true
+
+- id: command-goal
+  disabled: true
+
+- id: command-compact
+  disabled: true
+
+- id: hmr
+  disabled: true

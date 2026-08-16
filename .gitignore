@@ -1,0 +1,71 @@
+# ---- Gradle ----
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+**/build/
+
+# ---- Kotlin ----
+.kotlin/
+
+# ---- 本地环境与密钥 ----
+local.properties
+*.keystore
+*.jks
+*.p12
+*.p7b
+*.mobileprovision
+keystore.properties
+signing.properties
+secrets.properties
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+
+# ---- Android 产物 ----
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# ---- HarmonyOS ----
+*.hap
+oh_modules/
+.hvigor/
+**/oh-package-lock.json5
+**/.sign/
+harmonyApp/signing/
+
+# ---- iOS / Xcode ----
+xcuserdata/
+iosApp/DerivedData/
+iosApp/build/
+iosApp/*.xcodeproj/
+!iosApp/project.yml
+*.xcworkspace/xcuserdata/
+Pods/
+
+# ---- XCFramework 产物 ----
+shared/build/XCFrameworks/
+
+# ---- 运行时日志 ----
+*.log
+trace.jsonl
+debug.log
+
+# ---- 测试/覆盖率 ----
+**/build/reports/
+**/build/test-results/
+
+# ---- 本地克隆的临时内核源码（未入库的手工副本） ----
+third_party/
+harness-kernel/
+
+# ---- Node 本地缓存 ----
+node_modules/
+pnpm-lock.yaml

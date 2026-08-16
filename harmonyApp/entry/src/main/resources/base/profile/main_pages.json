@@ -1,0 +1,5 @@
+{
+  "src": [
+    { "name": "Index", "srcpath": "pages/Index", "buildFunction": "", "data": "" }
+  ]
+}

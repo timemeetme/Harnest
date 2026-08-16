@@ -1,0 +1,349 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    name: Parse version
+    runs-on: ubuntu-latest
+    outputs:
+      version_name: ${{ steps.parse.outputs.version_name }}
+      version_code: ${{ steps.parse.outputs.version_code }}
+      prev_tag: ${{ steps.parse.outputs.prev_tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Parse tag
+        id: parse
+        run: |
+          TAG="${GITHUB_REF_NAME#refs/tags/}"
+          VERSION_NAME="${TAG#v}"
+          VERSION_CODE=$(git rev-list --count HEAD)
+          PREV_TAG=$(git describe --tags --abbrev=0 $(git rev-list --tags --max-count=1 HEAD~1 2>/dev/null || echo HEAD~1) 2>/dev/null || echo "")
+          {
+            echo "version_name=$VERSION_NAME"
+            echo "version_code=$VERSION_CODE"
+            echo "prev_tag=$PREV_TAG"
+          } >> $GITHUB_OUTPUT
+          echo "Tag=$TAG  Name=$VERSION_NAME  Code=$VERSION_CODE  Prev=$PREV_TAG"
+
+  android:
+    name: Build Android APK
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+          server-id: gradle
+          server-username: GITHUB_ACTOR
+          server-password: GITHUB_TOKEN
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/build-cache-1
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/*.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Inject version into gradle.properties
+        run: |
+          sed -i '' "/^VERSION_NAME=/d" gradle.properties
+          sed -i '' "/^VERSION_CODE=/d" gradle.properties
+          echo "VERSION_NAME=${{ needs.version.outputs.version_name }}" >> gradle.properties
+          echo "VERSION_CODE=${{ needs.version.outputs.version_code }}" >> gradle.properties
+          cat gradle.properties
+
+      - name: Decode keystore
+        id: sign
+        if: env.SIGNING_KEY_BASE64 != ''
+        env:
+          SIGNING_KEY_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$SIGNING_KEY_BASE64" | base64 -d > android-release-key.jks
+          {
+            echo "ANDROID_KEYSTORE_PATH=$(pwd)/android-release-key.jks"
+            echo "ANDROID_KEYSTORE_PASSWORD=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"
+            echo "ANDROID_KEY_ALIAS=${{ secrets.ANDROID_KEY_ALIAS }}"
+            echo "ANDROID_KEY_PASSWORD=${{ secrets.ANDROID_KEY_PASSWORD }}"
+          } >> $GITHUB_ENV
+
+      - name: Build APK
+        run: |
+          chmod +x gradlew
+          ./gradlew :androidApp:assembleRelease --no-daemon --stacktrace
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ env.ANDROID_KEYSTORE_PATH }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ env.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ env.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ env.ANDROID_KEY_PASSWORD }}
+
+      - name: Rename APK
+        run: |
+          apk=$(ls androidApp/build/outputs/apk/release/*.apk 2>/dev/null | head -1)
+          if [ -n "$apk" ]; then
+            cp "$apk" "androidApp/build/outputs/apk/release/HarnessApp-${{ needs.version.outputs.version_name }}.apk"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-release
+          path: androidApp/build/outputs/apk/release/*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+  ios:
+    name: Build iOS IPA
+    needs: version
+    runs-on: macos-latest-xlarge
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: temurin
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches/build-cache-1
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', '**/*.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Inject version into gradle.properties
+        run: |
+          sed -i '' "/^VERSION_NAME=/d" gradle.properties
+          sed -i '' "/^VERSION_CODE=/d" gradle.properties
+          echo "VERSION_NAME=${{ needs.version.outputs.version_name }}" >> gradle.properties
+          echo "VERSION_CODE=${{ needs.version.outputs.version_code }}" >> gradle.properties
+
+      - name: Inject version into Info.plist
+        run: |
+          plist="iosApp/Sources/Info.plist"
+          [ -f "$plist" ] || plist="iosApp/Info.plist"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ needs.version.outputs.version_name }}" "$plist" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ needs.version.outputs.version_code }}" "$plist" 2>/dev/null || true
+
+      - name: Assemble XCFramework
+        run: |
+          chmod +x gradlew
+          ./gradlew :shared:assembleSharedReleaseXCFramework --no-daemon --stacktrace
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: iosApp
+        run: xcodegen generate
+
+      - name: Decode provisioning profile (if configured)
+        if: env.PROFILE_B64 != ''
+        env:
+          PROFILE_B64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$PROFILE_B64" | base64 -d > ~/Library/MobileDevice/Provisioning\ Profiles/HarnessApp.mobileprovision
+
+      - name: Build
+        working-directory: iosApp
+        run: |
+          xcodebuild build \
+            -project HarnessApp.xcodeproj \
+            -scheme HarnessApp \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Archive
+        working-directory: iosApp
+        run: |
+          xcodebuild archive \
+            -project HarnessApp.xcodeproj \
+            -scheme HarnessApp \
+            -destination 'generic/platform=iOS' \
+            -configuration Release \
+            -archivePath build/HarnessApp.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Export IPA
+        working-directory: iosApp
+        continue-on-error: true
+        run: |
+          xcodebuild \
+            -exportArchive \
+            -archivePath build/HarnessApp.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist ExportOptions.plist || echo "IPA export skipped — no signing credentials"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios-xcframework-release
+          path: shared/build/XCFrameworks/release/shared.xcframework
+          retention-days: 30
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: hashFiles('iosApp/build/export/*.ipa') != ''
+        with:
+          name: ios-ipa-release
+          path: iosApp/build/export/*.ipa
+          retention-days: 30
+          if-no-files-found: error
+
+  harmony:
+    name: Build HarmonyOS HAP
+    needs: version
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Check if hvigorw exists
+        id: preflight
+        run: |
+          if [ -f "harmonyApp/hvigorw" ]; then
+            echo "ok=true" >> $GITHUB_OUTPUT
+          else
+            echo "ok=false" >> $GITHUB_OUTPUT
+            echo "HarmonyOS build skipped — no hvigorw"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.preflight.outputs.ok == 'true'
+        with:
+          node-version: '18'
+
+      - uses: actions/setup-java@v4
+        if: steps.preflight.outputs.ok == 'true'
+        with:
+          java-version: '17'
+          distribution: temurin
+
+      - name: Build HAP
+        if: steps.preflight.outputs.ok == 'true'
+        working-directory: harmonyApp
+        run: |
+          chmod +x hvigorw
+          npm ci || npm install
+          ./hvigorw --mode module -p module=entry@default assembleHap --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        if: steps.preflight.outputs.ok == 'true' && hashFiles('harmonyApp/**/*.hap') != ''
+        with:
+          name: harmony-hap-release
+          path: harmonyApp/**/*.hap
+          retention-days: 30
+          if-no-files-found: warn
+
+  release:
+    name: Create GitHub Release
+    needs: [version, android, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List downloaded artifacts
+        run: find artifacts -type f | tee /tmp/artifact-list.txt
+
+      - name: Build changelog
+        id: changelog
+        run: |
+          VERSION_NAME="${{ needs.version.outputs.version_name }}"
+          PREV_TAG="${{ needs.version.outputs.prev_tag }}"
+          {
+            echo "# HarnessApp v${VERSION_NAME}"
+            echo ""
+            echo "**Android**: \`HarnessApp-${VERSION_NAME}.apk\`"
+            echo ""
+            echo "**iOS**: \`HarnessApp-${VERSION_NAME}.ipa\`"
+            echo ""
+            echo "**XCFramework**: \`shared.xcframework\`"
+            echo ""
+            if [ -n "$PREV_TAG" ]; then
+              echo "## Commits since $PREV_TAG"
+              echo ""
+              echo "\`\`\`"
+              git log --oneline $PREV_TAG..HEAD 2>/dev/null || git log --oneline -20
+              echo "\`\`\`"
+            else
+              echo "## Initial release"
+              echo ""
+              echo "\`\`\`"
+              git log --oneline -20
+              echo "\`\`\`"
+            fi
+            echo ""
+            echo "---"
+            echo "Built by GitHub Actions · Tag \`${{ github.ref_name }}\`"
+          } | tee $GITHUB_STEP_SUMMARY
+
+      - name: Collect release assets
+        id: assets
+        run: |
+          ASSETS=""
+          for f in artifacts/**/*.apk artifacts/**/*.ipa artifacts/**/*.hap; do
+            [ -f "$f" ] && ASSETS="$ASSETS,f=$f"
+          done
+          echo "assets=$ASSETS" >> $GITHUB_OUTPUT
+
+      - name: Package XCFramework as zip
+        run: |
+          for dir in artifacts/**/shared.xcframework; do
+            if [ -d "$dir" ]; then
+              parent=$(dirname "$dir")
+              base=$(basename "$parent")
+              zip -r "artifacts/${base}-xcframework.zip" "$dir"
+            fi
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "HarnessApp ${{ github.ref_name }}"
+          body_path: $GITHUB_STEP_SUMMARY
+          files: |
+            artifacts/**/*.apk
+            artifacts/**/*.ipa
+            artifacts/**/*.hap
+            artifacts/**/*-xcframework.zip
+          fail_on_unmatched_files: false
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

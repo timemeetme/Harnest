@@ -1,0 +1,138 @@
+﻿name: Kernel Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: 'Target branch to sync into (our repo default)'
+        required: false
+        default: 'main'
+      upstream_branch:
+        description: 'Upstream branch to merge from (deepseek-harness uses master)'
+        required: false
+        default: 'master'
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: kernel-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Capture old submodule hash
+        id: old_hash
+        run: |
+          echo "sha=$(git -C kernel/deepseek-harness rev-parse HEAD)" >> $GITHUB_OUTPUT
+          echo "short=$(git -C kernel/deepseek-harness rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Fetch upstream deepseek-harness
+        run: |
+          cd kernel/deepseek-harness
+          git remote add upstream https://github.com/deepseek-ai/deepseek-harness.git 2>/dev/null || true
+          git fetch upstream --tags
+          git checkout ${{ inputs.upstream_branch || 'master' }}
+
+      - name: Merge upstream
+        id: merge
+        continue-on-error: true
+        run: |
+          cd kernel/deepseek-harness
+          git merge upstream/${{ inputs.upstream_branch || 'master' }} --no-edit
+
+      - name: Handle merge conflicts
+        if: steps.merge.outcome == 'failure'
+        run: |
+          cd kernel/deepseek-harness
+          echo "### Merge conflict detected" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          git diff --name-only --diff-filter=U >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Please resolve manually." >> $GITHUB_STEP_SUMMARY
+          exit 1
+
+      - name: Check for updates
+        id: has_update
+        run: |
+          NEW_SHA=$(git -C kernel/deepseek-harness rev-parse HEAD)
+          OLD_SHA="${{ steps.old_hash.outputs.sha }}"
+          if [ "$NEW_SHA" = "$OLD_SHA" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No upstream changes since $OLD_SHA — skipping PR."
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "new_sha=$NEW_SHA" >> $GITHUB_OUTPUT
+            echo "new_short=$(git -C kernel/deepseek-harness rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate changelog
+        if: steps.has_update.outputs.changed == 'true'
+        id: changelog
+        run: |
+          OLD="${{ steps.old_hash.outputs.sha }}"
+          NEW="${{ steps.has_update.outputs.new_sha }}"
+          cd kernel/deepseek-harness
+          {
+            echo "### Upstream changelog ($OLD..$NEW)"
+            echo ""
+            echo "\`\`\`"
+            git log --oneline $OLD..$NEW
+            echo "\`\`\`"
+          } | tee $GITHUB_STEP_SUMMARY
+
+      - name: Commit submodule pointer
+        if: steps.has_update.outputs.changed == 'true'
+        run: |
+          git add kernel/deepseek-harness
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          cat > /tmp/commit-msg.txt <<'EOF'
+          chore(kernel): bump deepseek-harness submodule
+
+          Automated sync job.
+          EOF
+          echo "- old: ${{ steps.old_hash.outputs.sha }}" >> /tmp/commit-msg.txt
+          echo "- new: ${{ steps.has_update.outputs.new_sha }}" >> /tmp/commit-msg.txt
+          git commit -F /tmp/commit-msg.txt
+
+      - name: Create Pull Request
+        if: steps.has_update.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(kernel): bump deepseek-harness submodule"
+          branch: chore/kernel-sync-${{ steps.has_update.outputs.new_short }}
+          base: ${{ inputs.target_branch || 'main' }}
+          title: "chore(kernel): sync deepseek-harness @ ${{ steps.has_update.outputs.new_short }}"
+          body: |
+            Automated sync of `kernel/deepseek-harness` submodule from upstream.
+
+            | Field | Value |
+            |-------|-------|
+            | Old hash | `${{ steps.old_hash.outputs.sha }}` |
+            | New hash | `${{ steps.has_update.outputs.new_sha }}` |
+            | Upstream | `deepseek-ai/deepseek-harness@${{ inputs.upstream_branch || 'master' }}` |
+            | Synced at | ${{ github.event_name }} |
+
+            ${{ steps.changelog.outputs.stdout }}
+          add-paths: |
+            kernel/deepseek-harness
+            .gitmodules
+          author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
+          labels: |
+            automated
+            dependencies
+            kernel

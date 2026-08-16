@@ -1,0 +1,9 @@
+{
+  "name": "harnessapp-harmony",
+  "version": "0.1.0",
+  "description": "DSH Mobile — HarmonyOS App",
+  "main": "",
+  "author": "HarnessApp",
+  "license": "MIT",
+  "dependencies": {}
+}
