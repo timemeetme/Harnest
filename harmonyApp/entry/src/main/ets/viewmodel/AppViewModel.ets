@@ -1,283 +1,353 @@
-/**
- * AppViewModel — 持有 UI 状态 + 所有业务动作。
- * 对应 shared/src/commonMain/kotlin/com/harnessapp/shared/ui/AppViewModel.kt。
- *
- * ArkTS 下没有 Kotlin 的 data class copy()，所以 state 更新采用：
- *   1) 直接修改 state 的子对象属性（AppState 内部的 plain class），或
- *   2) 用 Object.assign 做浅拷贝
- *
- * 两种方式都能触发 @ObjectLink 驱动的 UI 刷新（ArkUI Proxy 深度拦截）。
- */
-
-import { DshWebSocketClient } from '../service/DshClient';
+import { common } from '@kit.AbilityKit';
+import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
-  UiState, SessionUi, ChatMessage, MessageRole, ConnectionStatus,
-  DetailsTab, WindowWidthClass, computeWidthClass,
-  SubagentUi, SubagentStatus, TodoItemUi, PlanItemUi, PlanStatus,
-  ToolCallUi, ToolStatus, GoalState, KernelConnectionState,
+  UiState, ChatMessage, MessageRole, SessionUi,
 } from '../model/UiModels';
+import { LocalEngine } from '../service/LocalEngine';
+import { ChatOutcome, ToolCallEntry, TodoSnapshotItem } from '../service/HarnessNative';
+import { ConfigService, ProviderConfig } from '../service/ConfigService';
+import { SessionStore, SessionRecord, StoredMessage } from '../service/SessionStore';
+import { PROVIDER_META } from '../common/Constants';
 
+const TAG = 'AppViewModel';
+const DOMAIN = 0x0305;
+
+/**
+ * 应用 ViewModel（本地内核 v2）。
+ *
+ * 模型选择语义：
+ *  - 会话粒度：SessionRecord.provider/model 保存，切换会话自动恢复
+ *  - 消息粒度：StoredMessage.provider/model 记录每条消息实际使用的模型
+ *  - 记住最后选择：ConfigService.setLastSelection — 新会话默认值
+ */
 @Observed
 export class AppViewModel {
   state: UiState = new UiState();
-  client: DshWebSocketClient = new DshWebSocketClient();
-  private unsubscribe: (() => void) | null = null;
+  private engine: LocalEngine = new LocalEngine();
+  private context: common.Context | null = null;
+  private store: SessionStore = SessionStore.get();
 
-  constructor() {
-    this.client.setErrorHandler((err: Error) => {
-      console.error('[DshClient] error:', err.message);
-    });
-    this.client.setCloseHandler(() => {
-      this.state.connection.status = ConnectionStatus.Disconnected;
-      this.state.isStreaming = false;
-    });
-    this.unsubscribe = this.client.subscribe((method, params) => {
-      this.handleNotification(method, params);
-    });
-  }
+  /** Index 启动时调用 */
+  init(context: common.Context): void {
+    this.context = context;
+    this.refreshNeedsConfig();
 
-  dispose(): void {
-    this.unsubscribe?.();
-    this.unsubscribe = null;
-    try { this.client.disconnect(); } catch (_) { /* ignore */ }
-  }
-
-  onWindowSizeChanged(widthPx: number): void {
-    const cls = computeWidthClass(widthPx);
-    this.state.widthClass = cls;
-    if (cls === WindowWidthClass.Compact) {
-      this.state.detailsOpen = false;
+    const records = this.store.loadAll();
+    const sessions: SessionUi[] = records.map((r: SessionRecord) => this.toSessionUi(r));
+    if (sessions.length > 0) {
+      this.state.sessions = sessions;
+      this.state.activeSessionId = sessions[0].id;
+      this.loadMessages(sessions[0].id);
+    } else {
+      this.createDraftSession();
     }
+    this.state.engineStatus = this.engine.isReady() ? '内核就绪' : '内核待命';
   }
 
-  toggleSidebar(): void {
-    this.state.sidebarOpen = !this.state.sidebarOpen;
+  // ── 会话管理 ────────────────────────────────────────────────
+
+  newSession(): void {
+    this.createDraftSession();
   }
 
-  toggleDetails(): void {
-    this.state.detailsOpen = !this.state.detailsOpen;
-  }
-
-  selectDetailsTab(tab: DetailsTab): void {
-    this.state.detailsTab = tab;
-    this.state.detailsOpen = true;
-  }
-
-  updateInput(text: string): void {
-    this.state.inputText = text;
-  }
-
-  setGoal(text: string): void {
-    this.state.goal.text = text;
-    this.state.goal.active = text.trim().length > 0;
-  }
-
-  selectSession(sessionId: string): void {
-    this.state.activeSessionId = sessionId;
-    this.state.messages = [];
-  }
-
-  newSession(): string {
-    const id = 'session-' + Date.now();
-    const session = new SessionUi();
-    session.id = id;
-    session.title = '新会话';
-    session.updatedAt = Date.now();
-    session.messageCount = 0;
-    this.state.sessions = [session].concat(this.state.sessions);
+  private createDraftSession(): void {
+    const def = ConfigService.get().getDefaultSelection();
+    const id = SessionStore.newId();
+    const record: SessionRecord = {
+      id: id,
+      title: '新会话',
+      provider: def.provider,
+      model: def.model,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: []
+    };
+    this.store.upsert(record);
+    this.state.sessions = [this.toSessionUi(record)].concat(this.state.sessions);
     this.state.activeSessionId = id;
     this.state.messages = [];
-    return id;
   }
 
-  deleteSession(sessionId: string): void {
-    const list = this.state.sessions.filter((s) => s.id !== sessionId);
-    this.state.sessions = list;
-    if (this.state.activeSessionId === sessionId) {
-      this.state.activeSessionId = list.length > 0 ? list[0].id : null;
-      this.state.messages = [];
+  selectSession(id: string): void {
+    if (this.state.activeSessionId === id) {
+      return;
     }
+    this.state.activeSessionId = id;
+    this.loadMessages(id);
   }
 
-  async connectKernel(
-    host: string, port: number, useTls: boolean,
-    provider: string, model: string, cwd: string = '/tmp',
-  ): Promise<void> {
-    this.state.connection.host = host;
-    this.state.connection.port = port;
-    this.state.connection.useTls = useTls;
-    this.state.connection.provider = provider;
-    this.state.connection.model = model;
-    this.state.connection.status = ConnectionStatus.Connecting;
-    this.state.workspace.path = cwd;
-    try {
-      const scheme = useTls ? 'wss' : 'ws';
-      const url = scheme + '://' + host + ':' + port;
-      await this.client.connect(url);
-      const info = await this.client.initialize({ cwd, provider, model });
-      this.state.connection.status = ConnectionStatus.Connected;
-      this.state.connection.serverName = info.name;
-      this.state.connection.serverVersion = info.version;
-      if (this.state.sessions.length === 0) {
-        this.newSession();
-      }
-    } catch (e) {
-      this.state.connection.status = ConnectionStatus.Error;
-      console.error('[AppViewModel] connect failed:', (e as Error).message);
-    }
-  }
-
-  async disconnectKernel(): Promise<void> {
-    try { await this.client.disconnect(); } catch (_) { /* ignore */ }
-    this.state.connection.status = ConnectionStatus.Disconnected;
-    this.state.isStreaming = false;
-    for (const s of this.state.sessions) s.isRunning = false;
-  }
-
-  sendMessage(content: string): void {
-    const trimmed = content.trim();
-    if (!trimmed) return;
-    const sessionId = this.state.activeSessionId ?? this.newSession();
-
-    const userMsg = new ChatMessage();
-    userMsg.id = 'msg-' + Date.now();
-    userMsg.role = MessageRole.User;
-    userMsg.content = trimmed;
-    userMsg.createdAt = Date.now();
-
-    this.state.messages = this.state.messages.concat([userMsg]);
-    this.state.inputText = '';
-    this.state.isStreaming = true;
-
-    for (let i = 0; i < this.state.sessions.length; i++) {
-      const s = this.state.sessions[i];
-      if (s.id === sessionId) {
-        s.messageCount += 1;
-        s.updatedAt = Date.now();
-        s.isRunning = true;
+  deleteSession(id: string): void {
+    this.store.delete(id);
+    this.engine.unmountIfMounted(id);
+    const rest = this.state.sessions.filter((s: SessionUi) => s.id !== id);
+    this.state.sessions = rest;
+    if (this.state.activeSessionId === id) {
+      if (rest.length > 0) {
+        this.state.activeSessionId = rest[0].id;
+        this.loadMessages(rest[0].id);
+      } else {
+        this.createDraftSession();
       }
     }
+  }
 
-    if (!this.client.isConnected) {
-      this.state.isStreaming = false;
-      this.appendAssistantError('未连接 DSH 内核');
+  // ── 模型选择（会话粒度 + 记住最后选择） ──────────────────────
+
+  /** 设置页保存后刷新引擎 profiles 与 needsConfig */
+  onConfigChanged(): void {
+    this.refreshNeedsConfig();
+    this.engine.refreshProfiles();
+  }
+
+  /** 当前会话切换模型（下一条消息生效） */
+  setSessionModel(provider: string, model: string): void {
+    const id = this.state.activeSessionId;
+    if (!id) {
+      return;
+    }
+    const record = this.store.get(id);
+    if (record === null) {
+      return;
+    }
+    record.provider = provider;
+    record.model = model;
+    record.updatedAt = Date.now();
+    this.store.upsert(record);
+
+    const sessions = this.state.sessions.slice();
+    for (let i = 0; i < sessions.length; i++) {
+      if (sessions[i].id === id) {
+        const s = sessions[i];
+        s.provider = provider;
+        s.model = model;
+        sessions[i] = s;
+        break;
+      }
+    }
+    this.state.sessions = sessions;
+    ConfigService.get().setLastSelection(provider, model);
+    this.engine.applyModel(provider, model);
+  }
+
+  /** 模型选择器数据源（已配置 key 的 provider 列表） */
+  usableProviders(): ProviderConfig[] {
+    return ConfigService.get().listUsableProviders();
+  }
+
+  providerLabel(provider: string): string {
+    const meta = PROVIDER_META[provider];
+    return meta !== undefined ? meta.label : provider;
+  }
+
+  refreshNeedsConfig(): void {
+    this.state.needsConfig = !ConfigService.get().hasUsableConfig();
+  }
+
+  // ── 发送消息 ────────────────────────────────────────────────
+
+  async sendMessage(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (trimmed.length === 0 || this.state.isSending) {
+      return;
+    }
+    if (!this.context) {
+      return;
+    }
+    if (this.state.needsConfig) {
+      this.pushLocalError('请先在「设置」中配置大模型 API');
       return;
     }
 
-    this.client.prompt(sessionId, []).then(() => {
-      // 入队成功，实际流式内容走 session.event 通知
-    }).catch((err: Error) => {
-      this.appendAssistantError('发送失败: ' + err.message);
+    const sessionId = this.state.activeSessionId ?? '';
+    const record = this.store.get(sessionId);
+    if (record === null) {
+      return;
+    }
+
+    this.state.isSending = true;
+    try {
+      // 1. 引擎启动（幂等）+ 会话挂载（应用会话模型选择）
+      await this.engine.ensureStarted(this.context);
+      await this.engine.mountSession(record);
+      this.state.engineStatus = '内核就绪';
+
+      // 2. 用户消息（记录使用的模型）
+      const userMsg = this.makeMessage(MessageRole.User, trimmed, record.provider, record.model);
+      this.appendMessage(userMsg);
+
+      // 3. 等待内核回合结束
+      const outcome = await this.engine.send(trimmed);
+
+      // 3.5 工具消息（时间序：工具调用先于 assistant 回复插入消息流）
+      const todosJson = this.todosToJson(outcome);
+      if (outcome.details !== undefined && outcome.details !== null) {
+        for (const call of outcome.details.toolCalls) {
+          this.appendMessage(this.makeToolMessage(call, todosJson));
+        }
+      }
+
+      // 4. assistant 回复（记录实际模型）
+      const reply = outcome.text.length > 0 ? outcome.text : this.describeReason(outcome);
+      const assistantMsg = this.makeMessage(MessageRole.Assistant, reply, record.provider, record.model);
+      this.appendMessage(assistantMsg);
+
+      // 5. 持久化会话（首条消息更新标题）
+      this.persistSession(record, trimmed);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : JSON.stringify(e);
+      hilog.error(DOMAIN, TAG, 'send failed: %{public}s', msg);
+      this.appendMessage(this.makeMessage(MessageRole.Assistant, '发送失败：' + msg, null, null, true));
+      // 会话状态仍持久化（含用户消息）
+      this.persistSession(record, trimmed);
+    } finally {
+      this.state.isSending = false;
+    }
+  }
+
+  // ── 内部 ────────────────────────────────────────────────────
+
+  private makeMessage(role: MessageRole, content: string,
+    provider: string | null, model: string | null, isError: boolean = false): ChatMessage {
+    const m = new ChatMessage();
+    m.id = 'm_' + Date.now() + '_' + Math.floor(Math.random() * 1e6).toString(36);
+    m.role = role;
+    m.content = content;
+    m.createdAt = Date.now();
+    m.provider = provider;
+    m.model = model;
+    m.isError = isError;
+    return m;
+  }
+
+  /** 工具调用 → 消息流节点（todo_write 携带整表快照） */
+  private makeToolMessage(call: ToolCallEntry, todosJson: string): ChatMessage {
+    const m = new ChatMessage();
+    m.id = 't_' + call.seq + '_' + call.callId;
+    m.role = MessageRole.Tool;
+    m.content = '';
+    m.createdAt = Date.now();
+    m.toolName = call.name;
+    m.toolStatus = call.status;
+    m.toolResult = call.result ?? '';
+    m.todosJson = call.name === 'todo_write' ? todosJson : '';
+    return m;
+  }
+
+  /** details.todos → JSON 字符串（无快照返回空串） */
+  private todosToJson(outcome: ChatOutcome): string {
+    if (outcome.details === undefined || outcome.details === null) {
+      return '';
+    }
+    const todos = outcome.details.todos;
+    if (todos === null || todos === undefined) {
+      return '';
+    }
+    const items: TodoSnapshotItem[] = [];
+    for (const t of todos) {
+      items.push(t);
+    }
+    return JSON.stringify(items);
+  }
+
+  private appendMessage(m: ChatMessage): void {
+    this.state.messages = this.state.messages.concat([m]);
+    const id = this.state.activeSessionId;
+    if (id) {
+      const sessions = this.state.sessions.slice();
+      for (let i = 0; i < sessions.length; i++) {
+        if (sessions[i].id === id) {
+          sessions[i].messageCount = this.state.messages.length;
+          break;
+        }
+      }
+      this.state.sessions = sessions;
+    }
+  }
+
+  private pushLocalError(text: string): void {
+    this.appendMessage(this.makeMessage(MessageRole.Assistant, text, null, null, true));
+  }
+
+  private persistSession(record: SessionRecord, firstUserText: string): void {
+    const msgs: StoredMessage[] = this.state.messages.map((m: ChatMessage) => {
+      const sm: StoredMessage = {
+        id: m.id,
+        role: m.role === MessageRole.User ? 'user' : (m.role === MessageRole.Tool ? 'tool' : 'assistant'),
+        content: m.content,
+        createdAt: m.createdAt
+      };
+      if (m.provider !== null) {
+        sm.provider = m.provider;
+      }
+      if (m.model !== null) {
+        sm.model = m.model;
+      }
+      if (m.role === MessageRole.Tool) {
+        sm.toolName = m.toolName;
+        sm.toolStatus = m.toolStatus;
+        sm.toolResult = m.toolResult;
+        sm.todosJson = m.todosJson;
+      }
+      return sm;
+    });
+    record.messages = msgs;
+    record.updatedAt = Date.now();
+    if (record.title === '新会话' && firstUserText.length > 0) {
+      record.title = SessionStore.titleFrom(firstUserText);
+    }
+    this.store.upsert(record);
+
+    const sessions = this.state.sessions.slice();
+    for (let i = 0; i < sessions.length; i++) {
+      if (sessions[i].id === record.id) {
+        sessions[i] = this.toSessionUi(record);
+        break;
+      }
+    }
+    this.state.sessions = sessions;
+  }
+
+  private loadMessages(sessionId: string): void {
+    const record = this.store.get(sessionId);
+    if (record === null) {
+      this.state.messages = [];
+      return;
+    }
+    this.state.messages = record.messages.map((sm: StoredMessage) => {
+      const m = new ChatMessage();
+      m.id = sm.id;
+      m.role = sm.role === 'user' ? MessageRole.User : (sm.role === 'tool' ? MessageRole.Tool : MessageRole.Assistant);
+      m.content = sm.content;
+      m.createdAt = sm.createdAt;
+      m.provider = sm.provider ?? null;
+      m.model = sm.model ?? null;
+      if (m.role === MessageRole.Tool) {
+        m.toolName = sm.toolName ?? '';
+        m.toolStatus = sm.toolStatus ?? 'ok';
+        m.toolResult = sm.toolResult ?? '';
+        m.todosJson = sm.todosJson ?? '';
+      }
+      return m;
     });
   }
 
-  addTodo(content: string): void {
-    const t = new TodoItemUi();
-    t.id = 'todo-' + Date.now();
-    t.content = content;
-    t.done = false;
-    t.order = this.state.todos.length;
-    this.state.todos = this.state.todos.concat([t]);
+  private toSessionUi(r: SessionRecord): SessionUi {
+    const s = new SessionUi();
+    s.id = r.id;
+    s.title = r.title;
+    s.provider = r.provider;
+    s.model = r.model;
+    s.createdAt = r.createdAt;
+    s.updatedAt = r.updatedAt;
+    s.messageCount = r.messages.length;
+    return s;
   }
 
-  toggleTodo(id: string): void {
-    for (const t of this.state.todos) {
-      if (t.id === id) t.done = !t.done;
+  private describeReason(outcome: ChatOutcome): string {
+    const reason = outcome.reason;
+    if (reason && reason.error && reason.error.message) {
+      return reason.error.message;
     }
-  }
-
-  deleteTodo(id: string): void {
-    this.state.todos = this.state.todos.filter((t) => t.id !== id);
-  }
-
-  private appendAssistantError(text: string): void {
-    const m = new ChatMessage();
-    m.id = 'msg-err-' + Date.now();
-    m.role = MessageRole.Assistant;
-    m.content = text;
-    m.createdAt = Date.now();
-    this.state.messages = this.state.messages.concat([m]);
-    this.state.isStreaming = false;
-  }
-
-  private handleNotification(method: string, params: Record<string, Object>): void {
-    switch (method) {
-      case 'session.event': this.onSessionEvent(params); break;
-      case 'session.status': this.onSessionStatus(params); break;
-      case 'subagent.started': this.onSubagentStarted(params); break;
-      case 'subagent.finished': this.onSubagentFinished(params); break;
-      default:
-        console.info('[DSH] unknown notification:', method);
-        break;
-    }
-  }
-
-  private onSessionEvent(params: Record<string, Object>): void {
-    const sessionId = String(params['sessionId'] ?? '');
-    const event = params['event'] ?? {};
-    const eventObj = event as Record<string, Object>;
-    const type = String(eventObj['type'] ?? eventObj['event'] ?? '');
-    const action = String(eventObj['action'] ?? '');
-
-    for (const s of this.state.sessions) {
-      if (s.id === sessionId) s.updatedAt = Date.now();
-    }
-
-    if (type === 'message' || action === 'append' || 'message' in eventObj) {
-      this.tryAppendAssistantDelta(eventObj);
-    }
-  }
-
-  private onSessionStatus(params: Record<string, Object>): void {
-    const sessionId = String(params['sessionId'] ?? '');
-    const raw = String((params['status'] as Record<string, Object>)['name'] ?? params['status'] ?? '');
-    const running = raw === 'running';
-    for (const s of this.state.sessions) {
-      if (s.id === sessionId) s.isRunning = running;
-    }
-    if (!running) {
-      this.state.isStreaming = false;
-    }
-  }
-
-  private onSubagentStarted(params: Record<string, Object>): void {
-    const child = String(params['childSessionId'] ?? '');
-    const parent = String(params['parentSessionId'] ?? '');
-    const sub = new SubagentUi();
-    sub.id = child;
-    sub.name = '子代理 ' + child.slice(-8);
-    sub.parentSessionId = parent;
-    sub.status = SubagentStatus.Running;
-    this.state.subagents = this.state.subagents.concat([sub]);
-  }
-
-  private onSubagentFinished(params: Record<string, Object>): void {
-    const child = String(params['childSessionId'] ?? '');
-    this.state.subagents = this.state.subagents.filter((s) => s.id !== child);
-  }
-
-  private tryAppendAssistantDelta(eventObj: Record<string, Object>): void {
-    const content = String(
-      eventObj['content'] ?? eventObj['text'] ?? eventObj['delta'] ?? '',
-    );
-    if (!content) return;
-
-    const last = this.state.messages.length > 0
-      ? this.state.messages[this.state.messages.length - 1]
-      : null;
-
-    if (last && last.role === MessageRole.Assistant) {
-      last.content = last.content + content;
-      last.isStreaming = true;
-    } else {
-      const m = new ChatMessage();
-      m.id = 'msg-a-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
-      m.role = MessageRole.Assistant;
-      m.content = content;
-      m.createdAt = Date.now();
-      m.isStreaming = true;
-      this.state.messages = this.state.messages.concat([m]);
-    }
-    this.state.isStreaming = true;
+    return '（模型未返回内容）';
   }
 }

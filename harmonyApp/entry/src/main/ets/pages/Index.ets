@@ -1,178 +1,185 @@
+﻿import { common } from '@kit.AbilityKit';
+import { mediaquery } from '@kit.ArkUI';
+import { ThemeColors, darkTheme } from '../theme/Theme';
+import { StorageService } from '../service/StorageService';
+import { ConfigService } from '../service/ConfigService';
 import { AppViewModel } from '../viewmodel/AppViewModel';
-import { AppShell } from '../components/AppShell';
-import { ConnectionSheet } from '../components/ConnectionSheet';
-import { DetailsPanel } from '../components/DetailsPanel';
-import { Theme } from '../theme/Theme';
-import { WindowWidthClass } from '../model/UiModels';
+import { ChatView } from '../components/ChatView';
+import { DetailsView } from '../components/DetailsView';
+import { SettingsView } from '../components/SettingsView';
+
+const TAB_CHAT = 0;
+const TAB_DETAILS = 1;
+const TAB_SETTINGS = 2;
 
 /**
- * Index — DSH Mobile 入口页面。
- *
- * 职责：
- *   1. 创建并持有唯一的 AppViewModel（@ObjectLink 传递给子组件）。
- *   2. 在根 Column 上监听 onAreaChange，把实际像素宽度传给 ViewModel。
- *   3. 用 bindSheet 管理连接设置、抽屉面板。
- *   4. Compact 断点下提供底部 TabBar 切换侧边功能。
+ * 应用主壳（EMM 式）：手机底部导航 / 宽屏横屏侧边导航。
+ * 三 Tab：对话 / 详情 / 设置。Stack 显隐保活，切换不销毁。
  */
 @Entry
 @Component
 struct Index {
   @State viewModel: AppViewModel = new AppViewModel();
-  @State showConnectionSheet: boolean = true;
-  @State showSidebarSheet: boolean = false;
-  @State showDetailsSheet: boolean = false;
+  @State tab: number = TAB_CHAT;
+  @State isWide: boolean = false;
+  @State isLandscape: boolean = false;
+  private theme: ThemeColors = darkTheme;
+  private listener: mediaquery.MediaQueryListener | null = null;
+  private landscapeListener: mediaquery.MediaQueryListener | null = null;
+
+  aboutToAppear(): void {
+    const ctx = getContext(this) as common.UIAbilityContext;
+    StorageService.get().init(ctx.filesDir);
+    ConfigService.get().load();
+    this.viewModel.init(ctx);
+
+    // 宽度断点：>=600vp 宽屏；横屏（宽>高）且宽屏才用侧边栏
+    this.listener = mediaquery.matchMediaSync('(min-width: 600vp)');
+    this.isWide = this.listener.matches;
+    this.listener.on('change', (result: mediaquery.MediaQueryResult) => {
+      this.isWide = result.matches;
+    });
+    this.landscapeListener = mediaquery.matchMediaSync('(min-aspect-ratio: 1/1)');
+    this.isLandscape = this.landscapeListener.matches;
+    this.landscapeListener.on('change', (result: mediaquery.MediaQueryResult) => {
+      this.isLandscape = result.matches;
+    });
+  }
 
   aboutToDisappear(): void {
-    this.viewModel.dispose();
+    if (this.listener !== null) {
+      this.listener.off('change');
+    }
+    if (this.landscapeListener !== null) {
+      this.landscapeListener.off('change');
+    }
   }
 
   build() {
-    Stack() {
-      Column() {
-        AppShell({ viewModel: this.viewModel })
-          .layoutWeight(1)
-          .width('100%')
-
-        this.bottomBar()
+    if (this.isWide && this.isLandscape) {
+      Row() {
+        this.sideRail()
+        Column() {
+          this.contentView()
+        }
+        .layoutWeight(1)
+        .height('100%')
       }
-      .width('100%')
-      .height('100%')
-      .backgroundColor(Theme.Dark.background)
-      .onAreaChange((oldVal: Area, newVal: Area) => {
-        const w = Number(newVal.width);
-        if (!Number.isNaN(w) && w > 0) {
-          this.viewModel.onWindowSizeChanged(w);
+      .width('100%').height('100%').backgroundColor(this.theme.background)
+    } else {
+      Column() {
+        Column() {
+          this.contentView()
+        }
+        .layoutWeight(1).width('100%')
+        this.bottomNav()
+      }
+      .width('100%').height('100%').backgroundColor(this.theme.background)
+    }
+  }
+
+  @Builder
+  contentView() {
+    Stack() {
+      ChatView({
+        viewModel: this.viewModel,
+        state: this.viewModel.state,
+        onGoSettings: () => {
+          this.tab = TAB_SETTINGS;
         }
       })
+        .visibility(this.tab === TAB_CHAT ? Visibility.Visible : Visibility.Hidden)
+        .hitTestBehavior(this.tab === TAB_CHAT ? HitTestMode.Default : HitTestMode.None)
+
+      DetailsView({ state: this.viewModel.state })
+        .visibility(this.tab === TAB_DETAILS ? Visibility.Visible : Visibility.Hidden)
+        .hitTestBehavior(this.tab === TAB_DETAILS ? HitTestMode.Default : HitTestMode.None)
+
+      SettingsView({
+        viewModel: this.viewModel,
+        onConfigSaved: () => {
+          this.viewModel.onConfigChanged();
+        }
+      })
+        .visibility(this.tab === TAB_SETTINGS ? Visibility.Visible : Visibility.Hidden)
+        .hitTestBehavior(this.tab === TAB_SETTINGS ? HitTestMode.Default : HitTestMode.None)
+    }
+    .width('100%').height('100%')
+  }
+
+  @Builder
+  sideRail() {
+    Column({ space: 4 }) {
+      Column() {
+        Text('⌘').fontSize('28fp')
+        Text('Harness').fontSize('11fp').fontColor(this.theme.textHint).margin({ top: 4 })
+      }
+      .width('100%').padding({ top: 20, bottom: 20 })
+
+      this.navItem('对话', TAB_CHAT)
+      this.navItem('详情', TAB_DETAILS)
+      this.navItem('设置', TAB_SETTINGS)
+
+      Blank()
+
+      Text('Harnest App').fontSize('10fp').fontColor(this.theme.textHint).padding({ bottom: 16 })
+    }
+    .width(96)
+    .height('100%')
+    .backgroundColor(this.theme.surface)
+    .alignItems(HorizontalAlign.Center)
+  }
+
+  @Builder
+  bottomNav() {
+    Row() {
+      this.navItemWide('对话', TAB_CHAT)
+      this.navItemWide('详情', TAB_DETAILS)
+      this.navItemWide('设置', TAB_SETTINGS)
     }
     .width('100%')
-    .height('100%')
-    .backgroundColor(Theme.Dark.background)
-    .bindSheet(this.showConnectionSheet, () => {
-      ConnectionSheet({ viewModel: this.viewModel })
-    }, {
-      height: '90%',
-      dragBar: true,
-      showInSubWindow: false,
-      onDisappear: () => { this.showConnectionSheet = false; },
-    })
-    .bindSheet(this.showSidebarSheet, () => {
-      Column() {
-        Row({ space: 8 }) {
-          Text('会话').fontSize(16).fontWeight(FontWeight.Bold).fontColor(Theme.Dark.textPrimary)
-          Blank()
-          Button('关闭')
-            .type(ButtonType.Normal)
-            .height(32)
-            .backgroundColor(Theme.Dark.surfaceElevated)
-            .fontColor(Theme.Dark.textPrimary)
-            .onClick(() => { this.showSidebarSheet = false; })
-        }
-        .width('100%')
-        .padding(12)
-        .backgroundColor(Theme.Dark.surface)
-        Divider().color(Theme.Dark.divider)
-        List() {
-          ForEach(this.viewModel.state.sessions, (s) => {
-            ListItem() {
-              Row({ space: 8 }) {
-                Text(s.title || '未命名会话')
-                  .fontSize(14)
-                  .fontColor(Theme.Dark.textPrimary)
-                  .layoutWeight(1)
-                if (s.isRunning) {
-                  Text('●').fontSize(10).fontColor(Theme.Dark.primary)
-                }
-              }
-              .width('100%')
-              .padding(14)
-              .backgroundColor(
-                this.viewModel.state.activeSessionId === s.id
-                  ? Theme.Dark.surfaceElevated
-                  : Color.Transparent,
-              )
-              .onClick(() => {
-                this.viewModel.selectSession(s.id);
-                this.showSidebarSheet = false;
-              })
-            }
-          }, (s) => s.id)
-        }
-        .listDirection(Axis.Vertical)
-        .layoutWeight(1)
-        .width('100%')
-        .padding(4)
-      }
-      .width('100%')
-      .height('100%')
-      .backgroundColor(Theme.Dark.surface)
-    }, {
-      height: '90%',
-      dragBar: true,
-      showInSubWindow: false,
-      onDisappear: () => { this.showSidebarSheet = false; },
-    })
-    .bindSheet(this.showDetailsSheet, () => {
-      Column() {
-        Row({ space: 8 }) {
-          Text('详情').fontSize(16).fontWeight(FontWeight.Bold).fontColor(Theme.Dark.textPrimary)
-          Blank()
-          Button('关闭')
-            .type(ButtonType.Normal)
-            .height(32)
-            .backgroundColor(Theme.Dark.surfaceElevated)
-            .fontColor(Theme.Dark.textPrimary)
-            .onClick(() => { this.showDetailsSheet = false; })
-        }
-        .width('100%')
-        .padding(12)
-        .backgroundColor(Theme.Dark.surface)
-        Divider().color(Theme.Dark.divider)
-        DetailsPanel({ viewModel: this.viewModel })
-          .layoutWeight(1)
-      }
-      .width('100%')
-      .height('100%')
-      .backgroundColor(Theme.Dark.surface)
-    }, {
-      height: '90%',
-      dragBar: true,
-      showInSubWindow: false,
-      onDisappear: () => { this.showDetailsSheet = false; },
+    .height(58)
+    .backgroundColor(this.theme.surface)
+    .justifyContent(FlexAlign.SpaceAround)
+    .border({ width: { top: 0.5 }, color: this.theme.divider })
+  }
+
+  @Builder
+  navItem(label: string, idx: number) {
+    Column() {
+      Text(this.glyph(idx)).fontSize('22fp')
+        .fontColor(this.tab === idx ? this.theme.primary : this.theme.textHint)
+      Text(label).fontSize('11fp')
+        .fontColor(this.tab === idx ? this.theme.primary : this.theme.textHint)
+        .margin({ top: 2 })
+    }
+    .width('100%')
+    .padding({ top: 10, bottom: 10 })
+    .borderRadius({ topLeft: 14, topRight: 14 })
+    .backgroundColor(this.tab === idx ? this.theme.background : Color.Transparent)
+    .onClick(() => {
+      this.tab = idx;
     })
   }
 
   @Builder
-  bottomBar() {
-    const cls = this.viewModel.state.widthClass;
-    if (cls === WindowWidthClass.Compact) {
-      Row({ space: 0 }) {
-        this.bottomBarItem('☰', '会话')
-          .layoutWeight(1)
-          .onClick(() => { this.showSidebarSheet = true; })
-        this.bottomBarItem('🔌', '连接')
-          .layoutWeight(1)
-          .onClick(() => { this.showConnectionSheet = true; })
-        this.bottomBarItem('📊', '详情')
-          .layoutWeight(1)
-          .onClick(() => { this.showDetailsSheet = true; })
-      }
-      .width('100%')
-      .height(52)
-      .backgroundColor(Theme.Dark.surface)
-      .border({ width: { top: 1 }, color: Theme.Dark.divider })
-      .justifyContent(FlexAlign.SpaceAround)
-      .alignItems(VerticalAlign.Center)
+  navItemWide(label: string, idx: number) {
+    Column() {
+      Text(this.glyph(idx)).fontSize('20fp')
+        .fontColor(this.tab === idx ? this.theme.primary : this.theme.textHint)
+      Text(label).fontSize('11fp')
+        .fontColor(this.tab === idx ? this.theme.primary : this.theme.textHint)
+        .margin({ top: 3 })
     }
+    .padding({ top: 8, bottom: 8 })
+    .onClick(() => {
+      this.tab = idx;
+    })
   }
 
-  @Builder
-  bottomBarItem(icon: string, label: string) {
-    Column({ space: 2 }) {
-      Text(icon).fontSize(20)
-      Text(label).fontSize(11).fontColor(Theme.Dark.textSecondary)
-    }
-    .padding(6)
-    .alignItems(HorizontalAlign.Center)
+  private glyph(idx: number): string {
+    if (idx === TAB_CHAT) return '💬';
+    if (idx === TAB_DETAILS) return '📊';
+    return '⚙';
   }
 }

@@ -1,53 +1,13 @@
 /**
- * HarmonyOS 侧的 UI 状态模型。
- * 一一对应 shared/src/commonMain/kotlin/com/harnessapp/shared/ui/UiState.kt。
- *
- * 说明：
- *  - ArkTS 不支持 Kotlin/Native 的 KMP 产物，所以这里手动镜像一份。
- *  - 所有 class 使用纯数据 + 默认值，便于在 @Observed 类里持有引用。
- *  - 所有字段必须可序列化（ArkTS 的 JSON 能力），方便从 JSON-RPC 通知反序列化。
+ * HarmonyOS 侧的 UI 状态模型（本地内核 v2）。
+ * @Observed 类仅追踪顶层属性 — 数组变更通过整体替换触发。
  */
 
 export enum MessageRole {
   User = 'user',
   Assistant = 'assistant',
-  System = 'system',
   Tool = 'tool',
-}
-
-export enum ToolStatus {
-  Pending = 'pending',
-  Running = 'running',
-  Success = 'success',
-  Error = 'error',
-}
-
-export enum PlanStatus {
-  Pending = 'pending',
-  InProgress = 'in_progress',
-  Done = 'done',
-  Blocked = 'blocked',
-}
-
-export enum SubagentStatus {
-  Running = 'running',
-  Done = 'done',
-  Error = 'error',
-}
-
-export enum ConnectionStatus {
-  Disconnected = 'disconnected',
-  Connecting = 'connecting',
-  Connected = 'connected',
-  Error = 'error',
-}
-
-export enum DetailsTab {
-  Tools = 'tools',
-  Plan = 'plan',
-  Todo = 'todo',
-  Subagents = 'subagents',
-  Settings = 'settings',
+  System = 'system',
 }
 
 export enum WindowWidthClass {
@@ -61,125 +21,46 @@ export class ChatMessage {
   role: MessageRole = MessageRole.User;
   content: string = '';
   createdAt: number = 0;
-  reasoning: string | null = null;
-  toolCalls: ToolCallUi[] = [];
-  isStreaming: boolean = false;
-}
-
-export class ToolCallUi {
-  id: string = '';
-  name: string = '';
-  args: string = '';
-  result: string | null = null;
-  status: ToolStatus = ToolStatus.Pending;
+  /** 该消息使用的模型（assistant 消息记录实际应答模型） */
+  provider: string | null = null;
+  model: string | null = null;
+  isError: boolean = false;
+  /** 工具消息（role=Tool）：工具名 */
+  toolName: string = '';
+  /** 工具消息状态：running | ok | error */
+  toolStatus: string = '';
+  /** 工具结果预览（截断后的文本） */
+  toolResult: string = '';
+  /** todo_write 消息携带的整表快照（JSON 数组，空串=无） */
+  todosJson: string = '';
 }
 
 export class SessionUi {
   id: string = '';
-  title: string = '';
+  title: string = '新会话';
+  provider: string = 'deepseek';
+  model: string = 'deepseek-chat';
+  createdAt: number = 0;
   updatedAt: number = 0;
   messageCount: number = 0;
-  isRunning: boolean = false;
 }
 
-export class TodoItemUi {
-  id: string = '';
-  content: string = '';
-  done: boolean = false;
-  order: number = 0;
-}
-
-export class PlanItemUi {
-  id: string = '';
-  title: string = '';
-  description: string | null = null;
-  status: PlanStatus = PlanStatus.Pending;
-  children: PlanItemUi[] = [];
-}
-
-export class ApprovalRequestUi {
-  id: string = '';
-  title: string = '';
-  description: string | null = null;
-  toolName: string | null = null;
-  createdAt: number = 0;
-}
-
-export class SubagentUi {
-  id: string = '';
-  name: string = '';
-  status: SubagentStatus = SubagentStatus.Running;
-  parentSessionId: string | null = null;
-}
-
-export class GoalState {
-  text: string = '';
-  active: boolean = false;
-}
-
-export class KernelConnectionState {
-  host: string = 'localhost';
-  port: number = 3080;
-  useTls: boolean = false;
-  provider: string = 'deepseek';
-  model: string = 'deepseek-chat';
-  status: ConnectionStatus = ConnectionStatus.Disconnected;
-  serverName: string | null = null;
-  serverVersion: string | null = null;
-}
-
-export class WorkspaceUi {
-  path: string = '';
-  name: string = '';
-}
-
-export class SettingsUi {
-  provider: string = 'deepseek';
-  model: string = 'deepseek-chat';
-  maxTokens: number = 8192;
-  autoApprove: boolean = false;
-  theme: string = 'system';
-  language: string = 'zh-CN';
-}
-
+@Observed
 export class UiState {
   sessions: SessionUi[] = [];
   activeSessionId: string | null = null;
   messages: ChatMessage[] = [];
-  todos: TodoItemUi[] = [];
-  plan: PlanItemUi[] = [];
-  approvals: ApprovalRequestUi[] = [];
-  subagents: SubagentUi[] = [];
-  goal: GoalState = new GoalState();
-  connection: KernelConnectionState = new KernelConnectionState();
-  workspace: WorkspaceUi = new WorkspaceUi();
-  settings: SettingsUi = new SettingsUi();
-  inputText: string = '';
-  isStreaming: boolean = false;
-  sidebarOpen: boolean = true;
-  detailsOpen: boolean = false;
-  detailsTab: DetailsTab = DetailsTab.Tools;
+  /** 发送中（等待内核回合结束） */
+  isSending: boolean = false;
+  /** 尚未配置任何大模型 API */
+  needsConfig: boolean = true;
+  /** 引擎状态文本（状态条显示） */
+  engineStatus: string = '内核未启动';
   widthClass: WindowWidthClass = WindowWidthClass.Compact;
 }
 
-export function computeWidthClass(widthPx: number): WindowWidthClass {
-  if (widthPx < 600) return WindowWidthClass.Compact;
-  if (widthPx <= 840) return WindowWidthClass.Medium;
+export function computeWidthClass(widthVp: number): WindowWidthClass {
+  if (widthVp < 600) return WindowWidthClass.Compact;
+  if (widthVp <= 840) return WindowWidthClass.Medium;
   return WindowWidthClass.Expanded;
-}
-
-export function sidebarWidthFor(cls: WindowWidthClass): number {
-  switch (cls) {
-    case WindowWidthClass.Compact: return 0;
-    case WindowWidthClass.Medium: return 240;
-    case WindowWidthClass.Expanded: return 300;
-  }
-}
-
-export function detailsWidthFor(cls: WindowWidthClass): number {
-  switch (cls) {
-    case WindowWidthClass.Compact: return 0;
-    case WindowWidthClass.Medium: return 0;
-    case WindowWidthClass.Expanded: return 360;
-  }
 }

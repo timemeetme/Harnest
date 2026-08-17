@@ -78,3 +78,6 @@ pnpm-lock.yaml
 
 # ---- harness 内核打包中间产物（源码+脚本入库，产物本地生成） ----
 tools/harness-transpiler/output/
+
+# ---- HarmonyOS 本地辅助脚本（硬编码本机 SDK 路径） ----
+harmonyApp/build.cmd

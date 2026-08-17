@@ -1,0 +1,9 @@
+{
+  "name": "harnessapp-harmony",
+  "version": "0.1.0",
+  "private": true,
+  "devDependencies": {
+    "@ohos/hvigor": "file:C:/Program Files/Huawei/DevEco Studio/tools/hvigor/hvigor",
+    "@ohos/hvigor-ohos-plugin": "file:C:/Program Files/Huawei/DevEco Studio/tools/hvigor/hvigor-ohos-plugin"
+  }
+}

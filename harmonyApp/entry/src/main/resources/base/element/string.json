@@ -1,8 +1,7 @@
 {
   "string": [
-    { "name": "module_desc", "value": "DSH Mobile entry module" },
-    { "name": "EntryAbility_desc", "value": "DSH Mobile main ability" },
-    { "name": "EntryAbility_label", "value": "DSH Mobile" },
-    { "name": "app_name", "value": "DSH Mobile" }
+    { "name": "module_desc", "value": "Harnest entry module" },
+    { "name": "EntryAbility_desc", "value": "Harnest main ability" },
+    { "name": "EntryAbility_label", "value": "Harnest" }
   ]
 }

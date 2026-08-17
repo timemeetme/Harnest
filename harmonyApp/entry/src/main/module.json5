@@ -1,8 +1,8 @@
-{
+﻿{
   "module": {
     "name": "entry",
     "type": "entry",
-    "description": "DSH Mobile 入口模块",
+    "description": "$string:module_desc",
     "mainElement": "EntryAbility",
     "deviceTypes": ["phone", "tablet"],
     "deliveryWithInstall": true,
@@ -12,9 +12,9 @@
       {
         "name": "EntryAbility",
         "srcEntry": "./ets/entryability/EntryAbility.ets",
-        "description": "DSH Mobile 主能力",
+        "description": "$string:EntryAbility_desc",
         "icon": "$media:app_icon",
-        "label": "$string:app_name",
+        "label": "$string:EntryAbility_label",
         "startWindowIcon": "$media:app_icon",
         "startWindowBackground": "$color:start_window_background",
         "exported": true,
@@ -30,3 +30,4 @@
     ]
   }
 }
+

@@ -1,6 +1,10 @@
-{
-  "bundleName": "com.harnessapp",
-  "vendor": "harnessapp",
-  "versionCode": 1,
-  "versionName": "0.1.0"
+﻿{
+  "app": {
+    "bundleName": "com.harnest.app",
+    "vendor": "harnest",
+    "versionCode": 1,
+    "versionName": "0.1.0",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name"
+  }
 }
