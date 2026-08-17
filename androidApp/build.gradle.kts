@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace = "com.harnessapp.app"
+    namespace = "com.harnest.app"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.harnessapp.app"
+        applicationId = "com.harnest.app"
         minSdk = 26
         targetSdk = 35
         versionCode = 1

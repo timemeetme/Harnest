@@ -5,15 +5,15 @@
 #      ./gradlew :shared:assembleSharedDebugXCFramework
 #      ./gradlew :shared:assembleSharedReleaseXCFramework
 #   2) cd iosApp && xcodegen generate
-#   3) open HarnessApp.xcodeproj，Cmd+R
+#   3) open Harnest.xcodeproj，Cmd+R
 #
 # active/ 软链机制（见 preActions）：
 #   Debug   → XCFrameworks/debug/shared.xcframework
 #   Release → XCFrameworks/release/shared.xcframework
 
-name: HarnessApp
+name: Harnest
 options:
-  bundleIdPrefix: com.harnessapp
+  bundleIdPrefix: com.harnest
   deploymentTarget:
     iOS: "16.0"
   createIntermediateGroups: true
@@ -22,7 +22,7 @@ settings:
     SWIFT_VERSION: "5.0"
     IPHONEOS_DEPLOYMENT_TARGET: "16.0"
 targets:
-  HarnessApp:
+  Harnest:
     type: application
     platform: iOS
     sources:
@@ -31,7 +31,7 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: DSH Mobile
-        CFBundleIdentifier: com.harnessapp.ios
+        CFBundleIdentifier: com.harnest.app
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         UILaunchScreen: {}
@@ -45,8 +45,8 @@ targets:
           NSAllowsArbitraryLoads: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.harnessapp.ios
-        PRODUCT_NAME: HarnessApp
+        PRODUCT_BUNDLE_IDENTIFIER: com.harnest.app
+        PRODUCT_NAME: Harnest
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         GENERATE_INFOPLIST_FILE: NO
@@ -80,9 +80,9 @@ targets:
             ln -s "$FW_SRC" "$FW_ACTIVE_DIR/shared.xcframework"
             echo "[$CFG_LOWER] → active/"
 schemes:
-  HarnessApp:
+  Harnest:
     build:
       targets:
-        HarnessApp: all
+        Harnest: all
     run:
       config: Debug

@@ -57,7 +57,7 @@ kotlin {
 }
 
 android {
-    namespace = "com.harnessapp.shared"
+    namespace = "com.harnest.app.shared"
     compileSdk = 35
     defaultConfig {
         minSdk = 26

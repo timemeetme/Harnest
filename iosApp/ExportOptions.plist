@@ -10,7 +10,7 @@
     <string>manual</string>
     <key>provisioningProfiles</key>
     <dict>
-        <key>com.harnessapp.ios</key>
+        <key>com.harnest.app</key>
         <string>YOUR_PROVISIONING_PROFILE_UUID</string>
     </dict>
     <key>stripSwiftSymbols</key>
