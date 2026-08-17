@@ -62,13 +62,49 @@ jobs:
 
           echo "harmony_dir_present=true" >> $GITHUB_OUTPUT
 
-      - name: Setup Node.js 18
+      - name: Setup Node.js 20
         if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
           cache: npm
           cache-dependency-path: harmonyApp/package-lock.json
+
+      # ════════════════════════════════════════════════════════════
+      # QuickJS 兼容性门禁：重建 harness.js 并静态检测缺失 API。
+      # 内核/手改导致 QuickJS 运行时缺失 → 构建明确失败（红），
+      # 报告见 artifact（quickjs-compat-report-*，含 AI 修复指引）。
+      # ════════════════════════════════════════════════════════════
+
+      - name: Setup pnpm
+        if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: QuickJS compatibility gate (rebuild + check)
+        if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
+        run: |
+          pnpm --dir kernel/deepseek-harness install --frozen-lockfile
+          pnpm --dir tools/harness-transpiler install --frozen-lockfile
+          pnpm --dir tools/harness-transpiler run build
+          pnpm --dir tools/harness-transpiler run patch
+          node tools/harness-transpiler/check-quickjs-compat.mjs \
+            --kernel-commit "$(git -C kernel/deepseek-harness rev-parse HEAD)"
+          # 门禁通过后将再生成的内核部署到 rawfile（CI 不依赖本地产物）
+          cp tools/harness-transpiler/output/harness.js \
+            harmonyApp/entry/src/main/resources/rawfile/harness.js
+
+      - name: Upload QuickJS compat report (always)
+        if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickjs-compat-report-${{ github.sha }}
+          path: |
+            tools/harness-transpiler/output/quickjs-compat-report.json
+            tools/harness-transpiler/output/harness.bundle.js
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Setup JDK 17 (KMP shared module)
         if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'

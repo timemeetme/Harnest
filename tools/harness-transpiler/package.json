@@ -1,0 +1,20 @@
+{
+  "name": "harness-transpiler",
+  "version": "0.1.0",
+  "description": "Compile deepseek-harness → single harness.js + Node polyfill layer",
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "patch": "node patch.mjs",
+    "all": "node build.mjs && node patch.mjs",
+    "check:quickjs": "node check-quickjs-compat.mjs"
+  },
+  "dependencies": {
+    "esbuild": "^0.25.12",
+    "quickjs-emscripten": "^0.32.0",
+    "quickjs-emscripten-core": "^0.32.0"
+  },
+  "devDependencies": {
+    "acorn": "^8.18.0"
+  }
+}

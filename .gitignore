@@ -58,6 +58,10 @@ shared/build/XCFrameworks/
 trace.jsonl
 debug.log
 
+# ---- 本地验证材料（含 API Key 等敏感数据，严禁入库） ----
+log/
+.verify/
+
 # ---- 测试/覆盖率 ----
 **/build/reports/
 **/build/test-results/
@@ -69,3 +73,8 @@ harness-kernel/
 # ---- Node 本地缓存 ----
 node_modules/
 pnpm-lock.yaml
+# transpiler 工具链的 lockfile 必须入库（CI --frozen-lockfile 依赖）
+!tools/harness-transpiler/pnpm-lock.yaml
+
+# ---- harness 内核打包中间产物（源码+脚本入库，产物本地生成） ----
+tools/harness-transpiler/output/

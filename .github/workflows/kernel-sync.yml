@@ -8,9 +8,13 @@ on:
         required: false
         default: 'main'
       upstream_branch:
-        description: 'Upstream branch to merge from (deepseek-harness uses master)'
+        description: 'Upstream branch (fallback when no stable tag exists)'
         required: false
         default: 'master'
+      upstream_ref:
+        description: 'Force a specific upstream ref (tag/commit/branch). Empty = auto latest stable tag'
+        required: false
+        default: ''
   schedule:
     - cron: '0 3 * * 1'
 
@@ -44,14 +48,44 @@ jobs:
           cd kernel/deepseek-harness
           git remote add upstream https://github.com/deepseek-ai/deepseek-harness.git 2>/dev/null || true
           git fetch upstream --tags
-          git checkout ${{ inputs.upstream_branch || 'master' }}
+
+      - name: Resolve upstream ref (latest stable tag preferred)
+        id: resolve
+        run: |
+          cd kernel/deepseek-harness
+          FORCED="${{ inputs.upstream_ref }}"
+          if [ -n "$FORCED" ]; then
+            echo "ref=$FORCED" >> $GITHUB_OUTPUT
+            echo "source=forced-input" >> $GITHUB_OUTPUT
+            echo "Resolved (forced): $FORCED"
+            exit 0
+          fi
+          # 最新稳定 tag：严格 semver（v1.2.3 / 1.2.3），排除 prerelease（-rc/-beta/...）
+          LATEST_STABLE=$(git tag --list --sort=-v:refname \
+            | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+$' \
+            | head -1 || true)
+          if [ -n "$LATEST_STABLE" ]; then
+            echo "ref=$LATEST_STABLE" >> $GITHUB_OUTPUT
+            echo "source=stable-tag" >> $GITHUB_OUTPUT
+            echo "Resolved latest stable tag: $LATEST_STABLE"
+          else
+            BR="${{ inputs.upstream_branch || 'master' }}"
+            echo "ref=$BR" >> $GITHUB_OUTPUT
+            echo "source=branch-fallback" >> $GITHUB_OUTPUT
+            echo "No stable tag found — falling back to branch: $BR"
+          fi
+
+      - name: Checkout resolved ref
+        run: |
+          cd kernel/deepseek-harness
+          git checkout ${{ steps.resolve.outputs.ref }}
 
       - name: Merge upstream
         id: merge
         continue-on-error: true
         run: |
           cd kernel/deepseek-harness
-          git merge upstream/${{ inputs.upstream_branch || 'master' }} --no-edit
+          git merge ${{ steps.resolve.outputs.ref }} --no-edit
 
       - name: Handle merge conflicts
         if: steps.merge.outcome == 'failure'
@@ -71,12 +105,82 @@ jobs:
           OLD_SHA="${{ steps.old_hash.outputs.sha }}"
           if [ "$NEW_SHA" = "$OLD_SHA" ]; then
             echo "changed=false" >> $GITHUB_OUTPUT
-            echo "No upstream changes since $OLD_SHA — skipping PR."
+            echo "No upstream changes since $OLD_SHA — skipping rebuild & PR."
           else
             echo "changed=true" >> $GITHUB_OUTPUT
             echo "new_sha=$NEW_SHA" >> $GITHUB_OUTPUT
             echo "new_short=$(git -C kernel/deepseek-harness rev-parse --short HEAD)" >> $GITHUB_OUTPUT
           fi
+
+      # ════════════════════════════════════════════════════════════
+      # 重建 harness.js + QuickJS 兼容性门禁
+      # 内核新增代码若引用 QuickJS+polyfill 缺失的 API → 本 job 明确失败，
+      # 报告 artifact 供 AI 工具（或人工）按指引修复 polyfill 后重跑。
+      # ════════════════════════════════════════════════════════════
+
+      - name: Setup pnpm
+        if: steps.has_update.outputs.changed == 'true'
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Setup Node.js
+        if: steps.has_update.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: pnpm
+          cache-dependency-path: |
+            tools/harness-transpiler/pnpm-lock.yaml
+            kernel/deepseek-harness/pnpm-lock.yaml
+
+      - name: Install kernel dependencies
+        if: steps.has_update.outputs.changed == 'true'
+        run: pnpm --dir kernel/deepseek-harness install --frozen-lockfile
+
+      - name: Install transpiler dependencies
+        if: steps.has_update.outputs.changed == 'true'
+        run: pnpm --dir tools/harness-transpiler install --frozen-lockfile
+
+      - name: Rebuild harness.js (bundle + patch)
+        if: steps.has_update.outputs.changed == 'true'
+        run: |
+          pnpm --dir tools/harness-transpiler run build
+          pnpm --dir tools/harness-transpiler run patch
+
+      - name: QuickJS compatibility gate
+        id: compat
+        if: steps.has_update.outputs.changed == 'true'
+        run: |
+          node tools/harness-transpiler/check-quickjs-compat.mjs \
+            --kernel-commit "${{ steps.has_update.outputs.new_sha }}"
+
+      - name: Upload QuickJS compat report (always)
+        if: steps.has_update.outputs.changed == 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickjs-compat-report-${{ steps.has_update.outputs.new_short || 'noop' }}
+          path: |
+            tools/harness-transpiler/output/quickjs-compat-report.json
+            tools/harness-transpiler/output/harness.bundle.js
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Explain failure (compat gate)
+        if: steps.has_update.outputs.changed == 'true' && failure() && steps.merge.outcome != 'failure'
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY <<'EOF'
+          ## ❌ QuickJS compatibility gate FAILED
+
+          内核新增代码引用了 QuickJS + polyfill 环境不存在的全局 API。
+          **此 PR 分支未创建** —— 修复后重跑本 workflow。
+
+          ### 修复路径（AI 工具可自动执行）
+          1. 下载 artifact `quickjs-compat-report-*`，读取 `missing[]` 清单与 `howToFix`
+          2. 对每个缺失 API 在 `tools/harness-transpiler/polyfills/host-bridge.js` 补 polyfill
+          3. 本地复现：`pnpm -C tools/harness-transpiler run build && pnpm -C tools/harness-transpiler run patch && node tools/harness-transpiler/check-quickjs-compat.mjs`
+          4. 通过后提交，并重新触发 Kernel Sync
+          EOF
 
       - name: Generate changelog
         if: steps.has_update.outputs.changed == 'true'
@@ -106,6 +210,7 @@ jobs:
           EOF
           echo "- old: ${{ steps.old_hash.outputs.sha }}" >> /tmp/commit-msg.txt
           echo "- new: ${{ steps.has_update.outputs.new_sha }}" >> /tmp/commit-msg.txt
+          echo "- quickjs-compat: PASS" >> /tmp/commit-msg.txt
           git commit -F /tmp/commit-msg.txt
 
       - name: Create Pull Request
@@ -124,8 +229,13 @@ jobs:
             |-------|-------|
             | Old hash | `${{ steps.old_hash.outputs.sha }}` |
             | New hash | `${{ steps.has_update.outputs.new_sha }}` |
-            | Upstream | `deepseek-ai/deepseek-harness@${{ inputs.upstream_branch || 'master' }}` |
+            | Upstream ref | `${{ steps.resolve.outputs.ref }}` (source: ${{ steps.resolve.outputs.source }}) |
             | Synced at | ${{ github.event_name }} |
+
+            ## ✅ QuickJS compatibility gate: PASS
+
+            新内核代码未引用 QuickJS + polyfill 环境缺失的全局 API。
+            检测详情见 run artifacts（`quickjs-compat-report-*`）。
 
             ${{ steps.changelog.outputs.stdout }}
           add-paths: |
