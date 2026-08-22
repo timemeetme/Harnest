@@ -2,53 +2,59 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDevelopmentRegion</key>
-    <string>$(DEVELOPMENT_LANGUAGE)</string>
-    <key>CFBundleDisplayName</key>
-    <string>Harnest</string>
-    <key>CFBundleExecutable</key>
-    <string>$(EXECUTABLE_NAME)</string>
-    <key>CFBundleIdentifier</key>
-    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-    <key>CFBundleInfoDictionaryVersion</key>
-    <string>6.0</string>
-    <key>CFBundleName</key>
-    <string>$(PRODUCT_NAME)</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>LSRequiresIPhoneOS</key>
-    <true/>
-    <key>UILaunchScreen</key>
-    <dict/>
-    <key>UIApplicationSceneManifest</key>
-    <dict>
-        <key>UIApplicationSupportsMultipleScenes</key>
-        <false/>
-    </dict>
-    <key>NSAppTransportSecurity</key>
-    <dict>
-        <key>NSAllowsArbitraryLoads</key>
-        <true/>
-    </dict>
-    <key>NSBonjourServices</key>
-    <array/>
-    <key>NSContactsUsageDescription</key>
-    <string>Harnest 需要访问通讯录以查询、创建和管理联系人。</string>
-    <key>NSCalendarsUsageDescription</key>
-    <string>Harnest 需要访问日历以查询、创建和管理日程事件。</string>
-    <key>NSCalendarsWriteOnlyAccessUsageDescription</key>
-    <string>Harnest 需要写入日历以创建日程事件。</string>
-    <key>NSPhotoLibraryUsageDescription</key>
-    <string>Harnest 需要访问相册以选取和管理照片。</string>
-    <key>NSPhotoLibraryAddUsageDescription</key>
-    <string>Harnest 需要保存照片到相册。</string>
-    <key>NSCameraUsageDescription</key>
-    <string>Harnest 需要使用相机以拍摄照片。</string>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Harnest 需要使用麦克风以录制音频。</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Harnest</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.harnest</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.1.0</string>
+	<key>CFBundleVersion</key>
+	<string>1</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>用于按指令查询/新建日历事件</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>用于按指令查询/新建日历事件</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>用于按指令新建日历事件</string>
+	<key>NSCameraUsageDescription</key>
+	<string>用于拍照并让 AI 分析画面内容</string>
+	<key>NSContactsUsageDescription</key>
+	<string>用于按指令查询/新建联系人</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>用于按指令获取当前位置</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用于录音转写与语音相关能力</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>用于将生成结果保存到相册</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>用于选择照片并交给 AI 分析</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
 </dict>
 </plist>

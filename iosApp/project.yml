@@ -57,10 +57,26 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: ""
         ENABLE_USER_SCRIPT_SANDBOXING: NO
+  HarnestTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - Tests/HarnestTests
+    dependencies:
+      - target: Harnest
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.harnest.tests
+        GENERATE_INFOPLIST_FILE: YES
 schemes:
   Harnest:
     build:
       targets:
         Harnest: all
+        HarnestTests: [test]
     run:
       config: Debug
+    test:
+      config: Debug
+      targets:
+        - HarnestTests
