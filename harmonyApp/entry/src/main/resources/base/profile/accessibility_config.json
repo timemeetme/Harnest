@@ -1,0 +1,14 @@
+{
+  "accessibilityCapabilities": [
+    "retrieve",
+    "touchGesture",
+    "keyEventObserver",
+    "gesture"
+  ],
+  "accessibilityEventTypes": [
+    "typeAllMask"
+  ],
+  "notificationTimeout": 100,
+  "accessibilityFocusCapability": true,
+  "uiNoninteractiveTimeout": 0
+}

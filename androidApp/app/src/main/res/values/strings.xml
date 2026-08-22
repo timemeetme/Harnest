@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Harnest</string>
+    <string name="accessibility_desc">Harnest GUI automation: read the screen UI tree, find elements, click/swipe/input, and trigger global actions (back/home). Enable it only when you want the agent to drive the UI.</string>
+</resources>

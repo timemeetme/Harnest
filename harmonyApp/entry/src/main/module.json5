@@ -22,11 +22,93 @@
           "entities": ["entity.system.home"],
           "actions": ["action.system.home"]
         }]
+      },
+      {
+        "name": "ShareAbility",
+        "srcEntry": "./ets/shareability/ShareAbility.ets",
+        "description": "$string:ShareAbility_desc",
+        "icon": "$media:app_icon",
+        "label": "$string:ShareAbility_label",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [{
+          "actions": ["ohos.want.action.sendData"],
+          "uris": [
+            { "scheme": "file", "type": "*/*" },
+            { "scheme": "content", "type": "*/*" }
+          ]
+        }]
+      }
+    ],
+    "extensionAbilities": [
+      {
+        "name": "AccessibilityExtAbility",
+        "srcEntry": "./ets/accessibilityextability/AccessibilityExtAbility.ets",
+        "label": "$string:AccessibilityExtAbility_label",
+        "description": "$string:AccessibilityExtAbility_desc",
+        "type": "accessibility",
+        "exported": true,
+        "metadata": [
+          {
+            "name": "ohos.accessibleability",
+            "resource": "$profile:accessibility_config"
+          }
+        ]
+      },
+      {
+        "name": "WorkSchedulerExtAbility",
+        "srcEntry": "./ets/workschedulerextability/WorkSchedulerExtAbility.ets",
+        "label": "$string:WorkSchedulerExtAbility_label",
+        "description": "$string:WorkSchedulerExtAbility_desc",
+        "type": "workScheduler",
+        "exported": true
       }
     ],
     "requestPermissions": [
       { "name": "ohos.permission.INTERNET" },
-      { "name": "ohos.permission.GET_NETWORK_INFO" }
+      { "name": "ohos.permission.GET_NETWORK_INFO" },
+      // 通讯录 READ_CONTACTS/WRITE_CONTACTS 为 ACL 受限权限（system_basic），
+      // 自动签名 profile 的 allowed-acls 为空导致安装失败(9568289)；
+      // 上架/真机前需在 AGC 为 Profile 开通受限权限后恢复声明，模拟器验证走"权限拒绝"降级路径
+      {
+        "name": "ohos.permission.READ_CALENDAR",
+        "reason": "$string:perm_calendar_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" }
+      },
+      {
+        "name": "ohos.permission.WRITE_CALENDAR",
+        "reason": "$string:perm_calendar_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" }
+      },
+      {
+        "name": "ohos.permission.MICROPHONE",
+        "reason": "$string:perm_microphone_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" }
+      },
+      {
+        "name": "ohos.permission.CAMERA",
+        "reason": "$string:perm_camera_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" }
+      },
+      // READ_MESSAGES 为 system_basic + ACL 受限权限，三方应用通常无法获批；
+      // 自动签名 profile 的 allowed-acls 为空导致安装失败(9568289)；
+      // 保留代码中的权限申请逻辑（运行时会被拒绝），但不在 manifest 中声明
+      {
+        "name": "ohos.permission.LOCATION",
+        "reason": "$string:perm_location_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" }
+      },
+      {
+        "name": "ohos.permission.APPROXIMATELY_LOCATION",
+        "reason": "$string:perm_location_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" }
+      },
+      {
+        "name": "ohos.permission.PUBLISH_AGENT_REMINDER",
+        "reason": "$string:perm_reminder_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "inuse" }
+      }
     ]
   }
 }

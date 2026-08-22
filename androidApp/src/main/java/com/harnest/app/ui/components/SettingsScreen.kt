@@ -200,6 +200,22 @@ fun SettingsScreen(
         }
 
         item {
+            SectionCard(title = "🧪 开发者") {
+                val ctx = androidx.compose.ui.platform.LocalContext.current
+                OutlinedButton(
+                    onClick = {
+                        ctx.startActivity(
+                            android.content.Intent(ctx, com.harnest.app.app.ui.DeviceTestActivity::class.java),
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("设备能力自测（通讯录/日历/剪贴板/文件/相册/邮件/拨号/相机/录音/应用）")
+                }
+            }
+        }
+
+        item {
             SectionCard(title = "ℹ️ 关于") {
                 AboutSection(state = state)
             }

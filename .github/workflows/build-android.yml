@@ -99,9 +99,9 @@ jobs:
 
       - name: Upload mapping (if exists)
         uses: actions/upload-artifact@v4
-        if: hashFiles('androidApp/build/outputs/mapping/release/mapping.txt') != ''
+        if: hashFiles('androidApp/app/build/outputs/mapping/release/mapping.txt') != ''
         with:
           name: android-mapping-${{ github.sha }}
-          path: androidApp/build/outputs/mapping/release/mapping.txt
+          path: androidApp/app/build/outputs/mapping/release/mapping.txt
           retention-days: 30
           if-no-files-found: ignore

@@ -335,7 +335,7 @@ function Invoke-Run {
         Write-Ok "pid 文件: $PidFile (Ctrl+C 停止后请 .\kernel.ps1 stop 清理)"
 
         $env:DSH_PORT = "$port"
-        $proc = Start-Process -FilePath 'pnpm' `
+        $proc = Start-Process -FilePath 'pnpm.cmd' `
             -ArgumentList @('dsh', '--profile', $profileName, '--patch', $patch) `
             -WorkingDirectory $KernelRoot `
             -PassThru -NoNewWindow

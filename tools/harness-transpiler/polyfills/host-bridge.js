@@ -50,6 +50,18 @@
     global.SuppressedError = SuppressedErrorPolyfill;
   }
 
+  // Node Buffer 最小 polyfill — 内核（session-title 截词/输入字节数计量）仅裸用
+  // Buffer.byteLength(str, 'utf8')。完整 Buffer 语义不实现；
+  // byteLength 调用时 TextEncoder 已由本文件注册（惰性取用，无顺序依赖）。
+  if (typeof global.Buffer === 'undefined' || global.Buffer === null) {
+    global.Buffer = {
+      byteLength(input, _encoding) {
+        return new global.TextEncoder().encode(String(input)).length;
+      },
+      isBuffer() { return false; },
+    };
+  }
+
   // QuickJS 宿主无 console（内核 adapter/桥的 console.log 会 ReferenceError，
   // 且在 __harnessOnFetchHeaders/Done 等回调里抛错会中断整个 fetch 生命周期）。
   // 桥接到 native 的 __harnessLog（shims 的 process.stderr 同款通道）；不可用时 no-op。
@@ -614,6 +626,10 @@
   const pendingFetches = new Map();
   let fetchSeq = 1;
 
+  // WHATWG fetch 语义：Promise 在响应头就绪时 resolve，body 之后渐进流入。
+  // kernel 的 SSE 客户端（llm-deepseek adapter）在 await fetch 后才消费
+  // response.body —— 若推迟到 done 才 resolve，流式传输退化为结束瞬间一次性
+  // 交付（宿主 chunk 渐进入队但无人读取）。故 headers 事件到达即 settle。
   global.__harnessOnFetchHeaders = function (id, status, headersJson) {
     const entry = pendingFetches.get(id);
     if (!entry) return;
@@ -622,6 +638,10 @@
       const raw = headersJson ? JSON.parse(headersJson) : {};
       entry.headers = new HeadersPolyfill(raw);
     } catch (_) { entry.headers = new HeadersPolyfill(); }
+    if (!entry.settled) {
+      entry.settled = true;
+      entry.resolve(entry._makeResponse());
+    }
   };
 
   global.__harnessOnFetchChunk = function (id, chunkText) {
@@ -633,12 +653,31 @@
     }
   };
 
+  // 临时 200 headers 的真实状态码修正（HarmonyOS requestInStream 到 dataEnd 才
+  // 给出状态码；HttpBridge 已按 200 交付，非 2xx 在此以流错误收尾并携带响应体）
+  global.__harnessOnFetchStatus = function (id, status) {
+    const entry = pendingFetches.get(id);
+    if (!entry) return;
+    pendingFetches.delete(id);
+    const code = Number(status) || 0;
+    entry.status = code;
+    const err = new TypeError('fetch failed: HTTP ' + code +
+      (entry.text ? ': ' + entry.text.slice(0, 500) : ''));
+    entry.body._controller.error(err);
+    if (entry._doneReject) entry._doneReject(err);
+    if (!entry.settled) { entry.settled = true; entry.reject(err); }
+  };
+
   global.__harnessOnFetchDone = function (id) {
     const entry = pendingFetches.get(id);
     if (!entry) return;
     pendingFetches.delete(id);
     entry.body._controller.close();
-    entry.resolve(entry._makeResponse());
+    if (!entry.settled) {
+      entry.settled = true;
+      entry.resolve(entry._makeResponse());
+    }
+    if (entry._doneResolve) entry._doneResolve();
   };
 
   global.__harnessOnFetchFail = function (id, errorText) {
@@ -647,7 +686,8 @@
     pendingFetches.delete(id);
     const err = new TypeError('fetch failed: ' + (errorText || 'unknown'));
     entry.body._controller.error(err);
-    entry.reject(err);
+    if (entry._doneReject) entry._doneReject(err);
+    if (!entry.settled) { entry.settled = true; entry.reject(err); }
   };
 
   // 仅 QuickJS 宿主（native 已注册 __harnessFetchStart）装 fetch 桥；
@@ -686,11 +726,20 @@
         return;
       }
       const bodyStream = new ReadableStreamPolyfill();
+      // text()/json() 非流式消费门闩：fetch Promise 已提前到 headers resolve，
+      // 此刻 body 可能仍在流入 —— 须等流终结（done/fail/status）再返回全文，
+      // 否则消费者会读到半截响应。
+      let doneResolve = null;
+      let doneReject = null;
+      const doneP = new Promise((res, rej) => { doneResolve = res; doneReject = rej; });
       const entry = {
         status: 0,
+        settled: false,
         headers: new HeadersPolyfill(),
         text: '',
         body: bodyStream,
+        _doneResolve: doneResolve,
+        _doneReject: doneReject,
         resolve,
         reject,
         _makeResponse() {
@@ -703,10 +752,12 @@
             url: String(url),
             headers: entry.headers,
             body: self.body,
-            text() { return Promise.resolve(self.text); },
+            text() { return doneP.then(() => self.text); },
             json() {
-              try { return Promise.resolve(JSON.parse(self.text)); }
-              catch (e) { return Promise.reject(e); }
+              return doneP.then(() => {
+                try { return JSON.parse(self.text); }
+                catch (e) { return Promise.reject(e); }
+              });
             },
           };
         },

@@ -58,6 +58,21 @@ static JSValue qjs_emit(JSContext* ctx, JSValueConst, int argc, JSValueConst* ar
     return JS_UNDEFINED;
 }
 
+/** 设备调用上行：device_* 工具 → __deviceCall(op,args) → 宿主（ArkTS DeviceBridge）执行。
+ *  返回 callId；宿主完成后经 deviceResult(callId, ok, json) 下行结算。
+ *  无宿主回调时抛 TypeError（polyfill 捕获转 reject，避免工具悬挂）。 */
+static JSValue qjs_device_call(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    if (argc < 1) return JS_ThrowTypeError(ctx, "__harnessDeviceCall: no request");
+    if (!g_callbacks.onDevice) return JS_ThrowTypeError(ctx, "__harnessDeviceCall: no device bridge");
+    const char* req = JS_ToCString(ctx, argv[0]);
+    if (!req) return JS_ThrowTypeError(ctx, "__harnessDeviceCall: bad request");
+    static int s_deviceId = 0;
+    int id = ++s_deviceId;
+    g_callbacks.onDevice(id, req);
+    JS_FreeCString(ctx, req);
+    return JS_NewInt32(ctx, id);
+}
+
 // ── fs 桥（同步 POSIX/std::filesystem，沙箱限制在 cwd 下） ──
 
 static bool pathInsideCwd(const std::string& path, std::string& resolvedOut) {
@@ -285,13 +300,16 @@ bool HarnessEngine::init(const std::string& jsCode, const HostCallbacks& callbac
     }
     JS_SetPropertyStr(ctx_, global, "__HARNESS_ENV", envObj);
 
-    // 2. 注册宿主桥函数（必须在 eval harness.js 之前 — host-bridge.js 探测后装 fetch/fs）
+    // 2. 注册宿主桥函数（必须在 eval harness.js 之前 — host-bridge.js 探测后装 fetch/fs，
+    //    device-bridge.js 探测 __harnessDeviceCall 后注册 device_* 工具）
     JS_SetPropertyStr(ctx_, global, "__harnessFetchStart",
         JS_NewCFunction(ctx_, qjs_fetch_start, "__harnessFetchStart", 1));
     JS_SetPropertyStr(ctx_, global, "__harnessEmit",
         JS_NewCFunction(ctx_, qjs_emit, "__harnessEmit", 1));
     JS_SetPropertyStr(ctx_, global, "__harnessFsCall",
         JS_NewCFunction(ctx_, qjs_fs_call, "__harnessFsCall", 1));
+    JS_SetPropertyStr(ctx_, global, "__harnessDeviceCall",
+        JS_NewCFunction(ctx_, qjs_device_call, "__harnessDeviceCall", 1));
     JS_FreeValue(ctx_, global);
 
     // 3. Patch + eval harness.js（GLOBAL 模式，export 块截断）
@@ -485,6 +503,7 @@ void HarnessEngine::fetchEvent(int fetchId, const std::string& kind, const std::
     else if (kind == "chunk") fnName = "__harnessOnFetchChunk";
     else if (kind == "done") fnName = "__harnessOnFetchDone";
     else if (kind == "fail") fnName = "__harnessOnFetchFail";
+    else if (kind == "status") fnName = "__harnessOnFetchStatus";
     if (!fnName) { JS_FreeValue(ctx_, global); return; }
 
     JSValue fn = JS_GetPropertyStr(ctx_, global, fnName);
@@ -503,6 +522,9 @@ void HarnessEngine::fetchEvent(int fetchId, const std::string& kind, const std::
     } else if (kind == "fail") {
         argv[1] = JS_NewString(ctx_, a.c_str());
         argc = 2;
+    } else if (kind == "status") {
+        argv[1] = JS_NewInt32(ctx_, atoi(a.c_str()));
+        argc = 2;
     }
     JSValue r = JS_Call(ctx_, fn, JS_UNDEFINED, argc, argv);
     if (JS_IsException(r)) {
@@ -515,6 +537,33 @@ void HarnessEngine::fetchEvent(int fetchId, const std::string& kind, const std::
     }
     JS_FreeValue(ctx_, r);
     for (int i = 0; i < argc; i++) JS_FreeValue(ctx_, argv[i]);
+    JS_FreeValue(ctx_, fn);
+    pumpJobs();
+}
+
+void HarnessEngine::deviceResult(int deviceId, bool ok, const std::string& json) {
+    if (!ctx_) return;
+    JSValue global = JS_GetGlobalObject(ctx_);
+    JSValue fn = JS_GetPropertyStr(ctx_, global, "__harnessOnDeviceResult");
+    JS_FreeValue(ctx_, global);
+    if (!JS_IsFunction(ctx_, fn)) { JS_FreeValue(ctx_, fn); return; }
+
+    JSValue argv[3] = {
+        JS_NewInt32(ctx_, deviceId),
+        JS_NewBool(ctx_, ok ? 1 : 0),
+        JS_NewString(ctx_, json.empty() ? "{}" : json.c_str()),
+    };
+    JSValue r = JS_Call(ctx_, fn, JS_UNDEFINED, 3, argv);
+    if (JS_IsException(r)) {
+        JSValue err = JS_GetException(ctx_);
+        const char* msg = JS_ToCString(ctx_, err);
+        fprintf(stderr, "[harness] __harnessOnDeviceResult error: %s\n", msg ? msg : "?");
+        if (g_callbacks.onLog) g_callbacks.onLog("stderr", std::string("[harness] deviceResult error: ") + (msg ? msg : "?"));
+        JS_FreeCString(ctx_, msg);
+        JS_FreeValue(ctx_, err);
+    }
+    JS_FreeValue(ctx_, r);
+    for (int i = 0; i < 3; i++) JS_FreeValue(ctx_, argv[i]);
     JS_FreeValue(ctx_, fn);
     pumpJobs();
 }

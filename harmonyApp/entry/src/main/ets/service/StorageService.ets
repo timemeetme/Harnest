@@ -71,6 +71,23 @@ export class StorageService {
     }
   }
 
+  /** 追加写（k3b 会话事件日志 .jsonl 逐行追加用） */
+  appendText(path: string, text: string): boolean {
+    try {
+      const idx = path.lastIndexOf('/');
+      if (idx > 0) {
+        this.ensureDir(path.substring(0, idx));
+      }
+      const f = fileIo.openSync(path, fileIo.OpenMode.READ_WRITE | fileIo.OpenMode.CREATE | fileIo.OpenMode.APPEND);
+      fileIo.writeSync(f.fd, text);
+      fileIo.closeSync(f);
+      return true;
+    } catch (e) {
+      hilog.error(DOMAIN, TAG, 'appendText fail %{public}s err=%{public}s', path, JSON.stringify(e));
+      return false;
+    }
+  }
+
   readText(path: string): string {
     try {
       if (!fileIo.accessSync(path)) {

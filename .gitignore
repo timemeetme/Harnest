@@ -1,4 +1,4 @@
-# ---- Gradle ----
+﻿# ---- Gradle ----
 .gradle/
 build/
 !gradle/wrapper/gradle-wrapper.jar
@@ -81,3 +81,43 @@ tools/harness-transpiler/output/
 
 # ---- HarmonyOS 本地辅助脚本（硬编码本机 SDK 路径） ----
 harmonyApp/build.cmd
+
+# ---- 本地调试 / UI 验证临时产物 ----
+.tmp/
+.tmp-*
+.tmp_*
+*.jpeg
+*.png
+/dump_*.json
+/dump_final*.json
+/layout_dump*.json
+layout_dump*.json
+*_dump*.xml
+/g*.xml
+/s*.xml
+/ui*.xml
+ui_dump*.xml
+/v*.xml
+ctx.txt
+tree.txt
+walk.ps1
+copy-harness.ps1
+build_logs/
+shots/
+tools/tmp/
+kernel/.pid
+
+# ---- 临时脚本 / 冒烟测试手工产物 ----
+tools/harness-transpiler/build2.mjs
+tools/harness-transpiler/patch-check.mjs
+tools/harness-transpiler/smoke-manual.mjs
+tools/harness-transpiler/smoke_base.txt
+tools/harness-transpiler/src/capability-manual.ts
+
+# ---- DevEco hvigor 工具链（自动生成，不入库）----
+hvigor/
+hvigor-ohos-plugin/
+
+# ---- 本地文档草稿 ----
+doc/
+.qa/

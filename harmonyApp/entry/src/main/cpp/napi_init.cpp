@@ -4,7 +4,8 @@
  * ArkTS API:
  *   harness.init(jsCode, cwd, env, callbacks) → boolean
  *     callbacks: { onLog(stream, chunk), onEvent(eventJson),
- *                  onFetch(fetchId, requestJson), onCallSettled(callId, ok, json) }
+ *                  onFetch(fetchId, requestJson), onDevice(deviceId, requestJson),
+ *                  onCallSettled(callId, ok, json) }
  *   harness.callFunc(name, jsonArgs) → string
  *     "{"async":true,"callId":N}"  — 结果经 onCallSettled 回调
  *     "{"async":false,"result":…}" — 同步完成（result 为原生 JSON）
@@ -34,6 +35,7 @@ struct CallbackRefs {
     napi_ref onLog = nullptr;
     napi_ref onEvent = nullptr;
     napi_ref onFetch = nullptr;
+    napi_ref onDevice = nullptr;
     napi_ref onCallSettled = nullptr;
 };
 static CallbackRefs g_refs;
@@ -49,6 +51,7 @@ static void ReleaseAllCallbacks() {
     ReleaseCallback(&g_refs.onLog);
     ReleaseCallback(&g_refs.onEvent);
     ReleaseCallback(&g_refs.onFetch);
+    ReleaseCallback(&g_refs.onDevice);
     ReleaseCallback(&g_refs.onCallSettled);
     g_refs.env = nullptr;
 }
@@ -108,6 +111,17 @@ static void ForwardOnFetch(int fetchId, const std::string& requestJson) {
     }
     napi_value argv[2] = { MakeInt(env, fetchId), MakeString(env, requestJson) };
     InvokeCallback(g_refs.onFetch, 2, argv);
+}
+
+static void ForwardOnDevice(int deviceId, const std::string& requestJson) {
+    napi_env env = g_refs.env;
+    if (!env) {
+        // 无法转发时立刻回失败，避免 device_* 工具 Promise 悬挂
+        if (g_engine) g_engine->deviceResult(deviceId, false, "{\"error\":\"no device bridge\"}");
+        return;
+    }
+    napi_value argv[2] = { MakeInt(env, deviceId), MakeString(env, requestJson) };
+    InvokeCallback(g_refs.onDevice, 2, argv);
 }
 
 static void ForwardOnCallSettled(int callId, bool ok, const std::string& json) {
@@ -174,6 +188,7 @@ static napi_value NativeInit(napi_env env, napi_callback_info info) {
             bindRef("onLog", &g_refs.onLog);
             bindRef("onEvent", &g_refs.onEvent);
             bindRef("onFetch", &g_refs.onFetch);
+            bindRef("onDevice", &g_refs.onDevice);
             bindRef("onCallSettled", &g_refs.onCallSettled);
         }
     }
@@ -206,6 +221,7 @@ static napi_value NativeInit(napi_env env, napi_callback_info info) {
     };
     cb.onEvent = ForwardOnEvent;
     cb.onFetch = ForwardOnFetch;
+    cb.onDevice = ForwardOnDevice;
     cb.onCallSettled = ForwardOnCallSettled;
 
     if (!engine->init(jsCode, cb)) {
@@ -276,6 +292,28 @@ static napi_value NativeFetchEvent(napi_env env, napi_callback_info info) {
     return undef;
 }
 
+/** deviceResult(deviceId: number, ok: boolean, resultJson: string) → void
+ *  设备调用结果下行：DeviceBridge 执行完成后回传，驱动 QuickJS __harnessOnDeviceResult */
+static napi_value NativeDeviceResult(napi_env env, napi_callback_info info) {
+    size_t argc = 3;
+    napi_value args[3];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    if (!g_engine || argc < 3) {
+        napi_value undef = nullptr;
+        napi_get_undefined(env, &undef);
+        return undef;
+    }
+    int32_t deviceId = 0;
+    bool ok = false;
+    napi_get_value_int32(env, args[0], &deviceId);
+    napi_get_value_bool(env, args[1], &ok);
+    const std::string json = ArgToString(env, args[2]);
+    g_engine->deviceResult(deviceId, ok, json.empty() ? "{}" : json);
+    napi_value undef = nullptr;
+    napi_get_undefined(env, &undef);
+    return undef;
+}
+
 /** pumpJobs() → number */
 static napi_value NativePumpJobs(napi_env env, napi_callback_info info) {
     (void)info;
@@ -313,6 +351,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         { "init",       nullptr, NativeInit,       nullptr, nullptr, nullptr, napi_default, nullptr },
         { "callFunc",   nullptr, NativeCallFunc,   nullptr, nullptr, nullptr, napi_default, nullptr },
         { "fetchEvent", nullptr, NativeFetchEvent, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "deviceResult", nullptr, NativeDeviceResult, nullptr, nullptr, nullptr, napi_default, nullptr },
         { "pumpJobs",   nullptr, NativePumpJobs,   nullptr, nullptr, nullptr, napi_default, nullptr },
         { "dispose",    nullptr, NativeDispose,    nullptr, nullptr, nullptr, napi_default, nullptr },
         { "isReady",    nullptr, NativeIsReady,    nullptr, nullptr, nullptr, napi_default, nullptr },

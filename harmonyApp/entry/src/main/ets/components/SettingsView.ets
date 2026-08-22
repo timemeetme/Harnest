@@ -1,9 +1,17 @@
 import { picker, fileIo } from '@kit.CoreFileKit';
 import { util } from '@kit.ArkTS';
 import { common } from '@kit.AbilityKit';
-import { promptAction } from '@kit.ArkUI';
+import { promptAction, router } from '@kit.ArkUI';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { ThemeColors, darkTheme } from '../theme/Theme';
+import {
+  APPEARANCE_MODES,
+  AppearanceMode,
+  AppearanceService,
+  KEY_APPEARANCE,
+  KEY_THEME,
+  appearanceLabel
+} from '../service/AppearanceService';
 import { AppViewModel } from '../viewmodel/AppViewModel';
 import { ConfigService, ProviderConfig, ImportOutcome } from '../service/ConfigService';
 import { ALL_PROVIDERS, PROVIDER_META } from '../common/Constants';
@@ -15,7 +23,8 @@ import { ALL_PROVIDERS, PROVIDER_META } from '../common/Constants';
 export struct SettingsView {
   viewModel: AppViewModel = new AppViewModel();
   onConfigSaved: () => void = () => {};
-  private theme: ThemeColors = darkTheme;
+  @StorageProp(KEY_THEME) theme: ThemeColors = darkTheme;
+  @StorageProp(KEY_APPEARANCE) appearanceMode: string = 'system';
   /** 正在编辑的 provider（null = 列表页） */
   @State editingProvider: string | null = null;
   @State editApiKey: string = '';
@@ -69,6 +78,33 @@ export struct SettingsView {
   mainPage() {
     Scroll() {
       Column() {
+        this.sectionHeader('外观', '深色 / 浅色 / 跟随系统，即时生效')
+        Row() {
+          ForEach(APPEARANCE_MODES, (m: AppearanceMode) => {
+            Column({ space: 6 }) {
+              Radio({ group: 'appearance', value: m })
+                .checked(this.appearanceMode === m)
+                .width(20).height(20)
+                .radioStyle({ checkedBackgroundColor: this.theme.primary })
+                .onChange((checked: boolean) => {
+                  if (checked) {
+                    AppearanceService.get().set(m);
+                  }
+                })
+              Text(appearanceLabel(m))
+                .fontSize('12fp')
+                .fontColor(this.appearanceMode === m ? this.theme.textPrimary : this.theme.textSecondary)
+            }
+            .layoutWeight(1)
+            .justifyContent(FlexAlign.Center)
+          }, (m: AppearanceMode) => m)
+        }
+        .width('100%')
+        .padding({ top: 14, bottom: 14 })
+        .borderRadius(10)
+        .backgroundColor(this.theme.surface)
+        .margin({ left: 16, right: 16 })
+
         this.sectionHeader('大模型 API', '配置服务商的 API Key（OpenAI 兼容端点，全部在本机内核中调用）')
         ForEach(ALL_PROVIDERS, (p: string) => {
           this.providerRow(p)
@@ -111,6 +147,25 @@ export struct SettingsView {
         .opacity(0.6)
         .onClick(() => {
           this.viewModel.state.engineStatus = this.viewModel.state.engineStatus;
+        })
+
+        this.sectionHeader('开发者', '设备能力桥（通讯录/日历/剪贴板/文件/相册/邮件/拨号/相机/录音/应用）')
+        Row() {
+          Column({ space: 2 }) {
+            Text('设备能力自测').fontSize('14fp').fontColor(this.theme.textPrimary)
+            Text('逐项驱动 12 类 device_* 能力，支持直连 / 全链路两种模式').fontSize('11fp').fontColor(this.theme.textHint)
+              .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Text('›').fontSize('16fp').fontColor(this.theme.textHint).margin({ left: 8 })
+        }
+        .width('100%')
+        .padding(14)
+        .borderRadius(10)
+        .backgroundColor(this.theme.surface)
+        .margin({ left: 16, right: 16 })
+        .onClick(() => {
+          router.pushUrl({ url: 'pages/DeviceTest' });
         })
 
         this.sectionHeader('关于', '')

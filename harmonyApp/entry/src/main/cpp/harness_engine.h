@@ -21,6 +21,8 @@ struct HostCallbacks {
     std::function<void(const std::string& eventJson)> onEvent;
     /** __harnessFetchStart — QuickJS 请求宿主发起 HTTP（ArkTS 用 @ohos.net.http 执行） */
     std::function<void(int fetchId, const std::string& requestJson)> onFetch;
+    /** __harnessDeviceCall — QuickJS device_* 工具请求宿主执行设备能力（ArkTS DeviceBridge） */
+    std::function<void(int deviceId, const std::string& requestJson)> onDevice;
     /** callFunc 的 Promise settle（chat/init 等异步调用完成） */
     std::function<void(int callId, bool ok, const std::string& json)> onCallSettled;
 };
@@ -55,6 +57,9 @@ public:
 
     /** 宿主 HTTP 事件下行：kind = "headers"(a=status,b=headersJson) / "chunk"(a=text) / "done" / "fail"(a=error) */
     void fetchEvent(int fetchId, const std::string& kind, const std::string& a, const std::string& b);
+
+    /** 设备能力回包下行：宿主 DeviceBridge 完成后调 JS 全局 __harnessOnDeviceResult(callId, ok, json) 结算 pending Promise */
+    void deviceResult(int deviceId, bool ok, const std::string& json);
 
     /** Promise settle 通知（静态 C 回调经 g_engine 调用 — 需 public） */
     void notifySettled(int callId, bool ok, const std::string& json);

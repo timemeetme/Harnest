@@ -36,5 +36,19 @@
     </dict>
     <key>NSBonjourServices</key>
     <array/>
+    <key>NSContactsUsageDescription</key>
+    <string>Harnest 需要访问通讯录以查询、创建和管理联系人。</string>
+    <key>NSCalendarsUsageDescription</key>
+    <string>Harnest 需要访问日历以查询、创建和管理日程事件。</string>
+    <key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+    <string>Harnest 需要写入日历以创建日程事件。</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Harnest 需要访问相册以选取和管理照片。</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Harnest 需要保存照片到相册。</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Harnest 需要使用相机以拍摄照片。</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Harnest 需要使用麦克风以录制音频。</string>
 </dict>
 </plist>

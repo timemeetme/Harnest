@@ -1,6 +1,7 @@
 ﻿import { common } from '@kit.AbilityKit';
 import { mediaquery } from '@kit.ArkUI';
 import { ThemeColors, darkTheme } from '../theme/Theme';
+import { KEY_THEME } from '../service/AppearanceService';
 import { StorageService } from '../service/StorageService';
 import { ConfigService } from '../service/ConfigService';
 import { AppViewModel } from '../viewmodel/AppViewModel';
@@ -23,7 +24,7 @@ struct Index {
   @State tab: number = TAB_CHAT;
   @State isWide: boolean = false;
   @State isLandscape: boolean = false;
-  private theme: ThemeColors = darkTheme;
+  @StorageProp(KEY_THEME) theme: ThemeColors = darkTheme;
   private listener: mediaquery.MediaQueryListener | null = null;
   private landscapeListener: mediaquery.MediaQueryListener | null = null;
 

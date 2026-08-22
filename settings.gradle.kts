@@ -26,3 +26,4 @@ rootProject.name = "HarnessApp"
 
 include(":shared")
 include(":androidApp")
+include(":androidApp:app")

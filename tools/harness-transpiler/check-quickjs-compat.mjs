@@ -64,6 +64,7 @@ function extractPolyfillGlobals() {
   const files = [
     path.join(__dirname, 'polyfills', 'host-bridge.js'),
     path.join(__dirname, 'polyfills', 'harness-shims-iife.js'),
+    path.join(__dirname, 'polyfills', 'device-bridge.js'),
   ]
   const re = /\bglobal(?:This)?\.([A-Za-z_$][\w$]*)\s*=/g
   for (const f of files) {

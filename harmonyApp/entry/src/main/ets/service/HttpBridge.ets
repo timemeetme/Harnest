@@ -7,11 +7,13 @@
  *
  * UTF-8 多字节序列可能跨 dataReceive 分包 — 用 TextDecoder stream 模式解码。
  *
- * 本 SDK headersReceive 回调参数不带 responseCode（实测 undefined），
- * 状态码从 requestInStream 的 resolve 值（HttpResponse.responseCode）补取：
- *   - headers 先于 done 事件发出（JS 侧 fetch 在 done 时才 resolve，
- *     读取 response.ok 前 status 必须就绪）
- *   - dataEnd 先到而 headers 未发时挂起 done，等 then 补发后一起发出
+ * 本 SDK headersReceive 回调参数不带 responseCode（实测 undefined），且
+ * requestInStream 的 resolve（唯一状态码来源）晚于 dataEnd。为保住流式
+ * （kernel 的 fetch Promise 现于 headers 即 resolve，见 host-bridge.js）：
+ *   - headersReceive 无状态码时先发临时 headers（status=200）让 body 渐进交付
+ *   - dataEnd 挂起 done，等 requestInStream resolve 校验真实状态码：
+ *     2xx → 补发 done；非 2xx → 发 status 事件（JS 侧将流置错并携带响应体）
+ *   - headersReceive 带状态码（其他 SDK）时直接发真实 headers
  */
 import http from '@ohos.net.http';
 import util from '@ohos.util';
@@ -30,12 +32,12 @@ export type FetchEventEmitter = (fetchId: number, kind: string, a: string, b: st
 export class HttpBridge {
   private requests: Map<number, http.HttpRequest> = new Map();
   private decoders: Map<number, util.TextDecoder> = new Map();
-  /** headers 事件尚未发出（等 requestInStream resolve 补状态码） */
+  /** headers 事件尚未发出（headersReceive 从未触发，兜底路径） */
   private needLateHeaders: Map<number, boolean> = new Map();
-  /** dataEnd 已到但 headers 未发，done 挂起中 */
+  /** dataEnd 已到但 done 挂起中 */
   private pendingDone: Map<number, boolean> = new Map();
-  /** headersReceive 缓存的响应头 JSON（status 就绪后随 headers 事件发出） */
-  private lateHeaderJson: Map<number, string> = new Map();
+  /** headers 已按临时 200 发出，真实状态码待 requestInStream resolve 校验 */
+  private statusUnverified: Map<number, boolean> = new Map();
   private emit: FetchEventEmitter;
 
   constructor(emit: FetchEventEmitter) {
@@ -59,20 +61,22 @@ export class HttpBridge {
     this.decoders.set(fetchId, decoder);
     this.needLateHeaders.set(fetchId, true);
     this.pendingDone.set(fetchId, false);
+    this.statusUnverified.set(fetchId, false);
 
     session.on('headersReceive', (header: Object) => {
       const h = header as Record<string, Object>;
       const code = h['responseCode'];
       const headers = h['header'];
+      const headerJson: string = headers !== undefined ? JSON.stringify(headers) : '{}';
       hilog.info(0x0307, 'HttpBridge', 'fetch#%{public}d headers status=%{public}s', fetchId, String(code));
-      // responseCode 实测 undefined：不在此发 headers（避免 status=0 → JS 侧 ok=false），
-      // 缓存响应头，由 requestInStream resolve 的状态码补发
+      this.needLateHeaders.set(fetchId, false);
       if (code !== undefined) {
-        this.needLateHeaders.set(fetchId, false);
-        this.emit(fetchId, 'headers', String(code),
-          headers !== undefined ? JSON.stringify(headers) : '{}');
+        this.emit(fetchId, 'headers', String(code), headerJson);
       } else {
-        this.lateHeaderJson.set(fetchId, headers !== undefined ? JSON.stringify(headers) : '{}');
+        // responseCode 实测 undefined：先发临时 200 让 JS 侧 fetch 立即 resolve、
+        // SSE 渐进消费；真实状态码由 requestInStream resolve 校验（见 then）
+        this.statusUnverified.set(fetchId, true);
+        this.emit(fetchId, 'headers', '200', headerJson);
       }
     });
     session.on('dataReceive', (data: ArrayBuffer) => {
@@ -101,8 +105,8 @@ export class HttpBridge {
           hilog.warn(0x0307, 'HttpBridge', 'fetch#%{public}d final flush failed: %{public}s', fetchId, String(e));
         }
       }
-      if (this.needLateHeaders.get(fetchId) === true) {
-        // headers 未发（状态码未就绪）：挂起 done，等 requestInStream resolve 一起发
+      if (this.needLateHeaders.get(fetchId) === true || this.statusUnverified.get(fetchId) === true) {
+        // 状态码未校验（或 headers 未发）：挂起 done，等 requestInStream resolve 一起处理
         this.pendingDone.set(fetchId, true);
         return;
       }
@@ -121,11 +125,26 @@ export class HttpBridge {
 
     session.requestInStream(req.url, options).then((code: number) => {
       hilog.info(0x0307, 'HttpBridge', 'fetch#%{public}d resolved status=%{public}d', fetchId, code);
+      if (this.statusUnverified.get(fetchId) === true) {
+        // headers 已按临时 200 发出：真实状态码校验
+        this.statusUnverified.set(fetchId, false);
+        if (code >= 200 && code < 300) {
+          // dataEnd 已先到达：补发挂起的 done
+          if (this.pendingDone.get(fetchId) === true) {
+            this.finish(fetchId);
+          }
+          return;
+        }
+        // 临时 200 误报：不发 done，以 status 事件将 JS 侧流置错（携带响应体）
+        this.pendingDone.set(fetchId, false);
+        this.cleanup(fetchId);
+        this.emit(fetchId, 'status', String(code), '');
+        return;
+      }
       if (this.needLateHeaders.get(fetchId) === true) {
+        // headersReceive 从未触发（兜底）：此刻才发真实 headers
         this.needLateHeaders.set(fetchId, false);
-        const headerJson: string = this.lateHeaderJson.get(fetchId) ?? '{}';
-        this.lateHeaderJson.delete(fetchId);
-        this.emit(fetchId, 'headers', String(code), headerJson);
+        this.emit(fetchId, 'headers', String(code), '{}');
       }
       // dataEnd 已先到达：补发挂起的 done
       if (this.pendingDone.get(fetchId) === true) {
@@ -171,7 +190,7 @@ export class HttpBridge {
     this.decoders.delete(fetchId);
     this.needLateHeaders.delete(fetchId);
     this.pendingDone.delete(fetchId);
-    this.lateHeaderJson.delete(fetchId);
+    this.statusUnverified.delete(fetchId);
   }
 
   private toMethod(m: string): http.RequestMethod {

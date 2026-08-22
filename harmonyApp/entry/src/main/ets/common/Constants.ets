@@ -13,6 +13,30 @@ export class AppConstants {
   static readonly DIR_SESSIONS: string = 'sessions';
 }
 
+/** k 系列：思考强度选项（value=null 表示跟随服务端默认，不传 reasoningEffort） */
+export interface EffortOption {
+  value: string | null;
+  label: string;
+  hint: string;
+}
+
+/** k1/k19 思考模式面板选项（对齐 Android 蓝本文案） */
+export const EFFORT_OPTIONS: EffortOption[] = [
+  { value: null, label: '默认', hint: '跟随服务端默认设置' },
+  { value: 'off', label: '关闭', hint: '不输出思考过程，速度最快' },
+  { value: 'high', label: '标准', hint: '标准思考模式' },
+  { value: 'max', label: '最高', hint: '最高强度思考，耗时更长' }
+];
+
+/** k1：reasoningEffort 合法值校验（持久化前过滤脏数据） */
+export class ReasoningEfforts {
+  static readonly ALL: string[] = ['off', 'high', 'max'];
+
+  static isValid(v: string | null | undefined): boolean {
+    return v !== null && v !== undefined && v.length > 0 && ReasoningEfforts.ALL.indexOf(v) >= 0;
+  }
+}
+
 /** Provider 标识（与引擎 profiles 表键对齐） */
 export enum AiProvider {
   DEEPSEEK = 'deepseek',
@@ -101,8 +125,8 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
     provider: AiProvider.GEMINI,
     label: 'Gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    defaultModel: 'gemini-2.5-flash',
-    models: ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.0-flash', 'gemini-2.5-flash-lite'],
+    defaultModel: 'gemini-3.7-flash',
+    models: ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-pro-latest'],
     keyUrl: 'https://aistudio.google.com/apikey'
   },
   [AiProvider.CUSTOM]: {

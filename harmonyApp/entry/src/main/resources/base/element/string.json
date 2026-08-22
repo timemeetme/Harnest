@@ -2,6 +2,19 @@
   "string": [
     { "name": "module_desc", "value": "Harnest entry module" },
     { "name": "EntryAbility_desc", "value": "Harnest main ability" },
-    { "name": "EntryAbility_label", "value": "Harnest" }
+    { "name": "EntryAbility_label", "value": "Harnest" },
+    { "name": "perm_contacts_reason", "value": "用于查询、创建和管理联系人" },
+    { "name": "perm_calendar_reason", "value": "用于查询、创建和管理日程事件" },
+    { "name": "perm_microphone_reason", "value": "用于录制音频" },
+    { "name": "perm_camera_reason", "value": "用于拍摄照片" },
+    { "name": "perm_sms_reason", "value": "用于读取短信记录" },
+    { "name": "perm_location_reason", "value": "用于获取当前位置" },
+    { "name": "perm_reminder_reason", "value": "用于发布定时提醒" },
+    { "name": "ShareAbility_desc", "value": "接收系统分享的内容" },
+    { "name": "ShareAbility_label", "value": "Harness" },
+    { "name": "AccessibilityExtAbility_desc", "value": "提供屏幕内容读取与手势注入，用于 GUI 自动化" },
+    { "name": "AccessibilityExtAbility_label", "value": "Harness GUI 自动化" },
+    { "name": "WorkSchedulerExtAbility_desc", "value": "后台定时任务调度" },
+    { "name": "WorkSchedulerExtAbility_label", "value": "Harness 定时任务" }
   ]
 }

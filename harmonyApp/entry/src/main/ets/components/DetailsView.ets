@@ -1,6 +1,8 @@
 import { ThemeColors, darkTheme } from '../theme/Theme';
-import { UiState, ChatMessage, MessageRole } from '../model/UiModels';
+import { KEY_THEME } from '../service/AppearanceService';
+import { UiState, ChatMessage, MessageRole, LiveItem } from '../model/UiModels';
 import { TodoSnapshotItem } from '../service/HarnessNative';
+import { parseTrace } from './ChatView';
 
 /**
  * 详情页：回合执行轨迹（Trajectory）。
@@ -10,7 +12,7 @@ import { TodoSnapshotItem } from '../service/HarnessNative';
 @Component
 export struct DetailsView {
   @ObjectLink @Watch('onStateChanged') state: UiState;
-  private theme: ThemeColors = darkTheme;
+  @StorageProp(KEY_THEME) theme: ThemeColors = darkTheme;
   private scroller: Scroller = new Scroller();
 
   onStateChanged(): void {
@@ -145,8 +147,31 @@ export struct DetailsView {
 
   // ── 辅助 ──────────────────────────────────────────────────
 
+  /**
+   * 工具轨迹来源：旧数据为独立 Tool 消息；新架构归并进 assistant 消息的 traceJson，此处展开还原。
+   */
   private trajItems(): ChatMessage[] {
-    return this.state.messages.filter((m: ChatMessage) => m.role === MessageRole.Tool);
+    const out: ChatMessage[] = [];
+    for (const m of this.state.messages) {
+      if (m.role === MessageRole.Tool) {
+        out.push(m);
+      } else if (m.role === MessageRole.Assistant && m.traceJson.length > 0) {
+        for (const t of parseTrace(m.traceJson)) {
+          if (t.kind !== 'tool') {
+            continue;
+          }
+          const v = new ChatMessage();
+          v.id = m.id + '_t_' + (t.callId.length > 0 ? t.callId : t.name);
+          v.role = MessageRole.Tool;
+          v.createdAt = m.createdAt;
+          v.toolName = t.name;
+          v.toolStatus = t.status;
+          v.toolResult = t.result.length > 0 ? t.result : t.args;
+          out.push(v);
+        }
+      }
+    }
+    return out;
   }
 
   private totalCalls(): number {
@@ -157,15 +182,27 @@ export struct DetailsView {
     return this.trajItems().filter((m: ChatMessage) => m.toolStatus === 'error').length;
   }
 
-  /** 最新 todo 快照的条目数（无快照为 0） */
+  /** 最新 todo 快照的条目数（优先 traceJson 内 Todos 项，兜底旧 todosJson；无快照为 0） */
   private totalTodos(): number {
-    const items = this.trajItems();
-    for (let i = items.length - 1; i >= 0; i--) {
-      if (items[i].todosJson.length > 0) {
-        return this.parseTodos(items[i].todosJson).length;
+    let count = 0;
+    for (const m of this.state.messages) {
+      if (m.traceJson.length > 0) {
+        let found = false;
+        for (const it of parseTrace(m.traceJson)) {
+          if (it.kind === 'todos') {
+            found = true;
+            count = it.todos.length;
+          }
+        }
+        if (found) {
+          continue;
+        }
+      }
+      if (m.todosJson.length > 0) {
+        count = this.parseTodos(m.todosJson).length;
       }
     }
-    return 0;
+    return count;
   }
 
   private parseTodos(json: string): TodoSnapshotItem[] {

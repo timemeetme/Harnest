@@ -1,6 +1,6 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { StorageService } from './StorageService';
-import { AiProvider, PROVIDER_META, ALL_PROVIDERS, IMPORT_ALIAS, IMPORT_UNSUPPORTED } from '../common/Constants';
+import { AiProvider, PROVIDER_META, ALL_PROVIDERS, IMPORT_ALIAS, IMPORT_UNSUPPORTED, ReasoningEfforts } from '../common/Constants';
 import { ProviderProfileInput, EngineConfig, ModelInput } from './HarnessNative';
 
 const TAG = 'ConfigService';
@@ -22,6 +22,7 @@ export interface AiConfig {
   configs: Record<string, ProviderConfig>;
   lastProvider: string;
   lastModel: string;
+  lastEffort?: string;
 }
 
 /** 导出格式 */
@@ -120,17 +121,26 @@ export class ConfigService {
     this.save();
   }
 
-  /** 记住最后一次模型选择（发送消息/切换模型时调用） */
-  setLastSelection(provider: string, model: string): void {
+  /** 记住最后一次模型选择（发送消息/切换模型时调用；effort 合法才写，否则清除） */
+  setLastSelection(provider: string, model: string, effort?: string): void {
     const c = this.load();
     c.lastProvider = provider;
     c.lastModel = model;
+    if (ReasoningEfforts.isValid(effort)) {
+      c.lastEffort = effort;
+    } else {
+      c.lastEffort = undefined;
+    }
     this.save();
   }
 
   getLastSelection(): ModelSelectionPersist {
     const c = this.load();
-    return { provider: c.lastProvider, model: c.lastModel };
+    const sel: ModelSelectionPersist = { provider: c.lastProvider, model: c.lastModel };
+    if (ReasoningEfforts.isValid(c.lastEffort)) {
+      sel.effort = c.lastEffort;
+    }
+    return sel;
   }
 
   /** 任意可用配置是否存在 */
@@ -158,22 +168,35 @@ export class ConfigService {
     return out;
   }
 
-  /** 默认 provider/model：优先最后选择，否则第一个可用 */
+  /** 默认 provider/model/effort：优先最后选择，否则第一个可用 */
   getDefaultSelection(): ModelSelectionPersist {
     const c = this.load();
+    const effort = ReasoningEfforts.isValid(c.lastEffort) ? c.lastEffort : undefined;
     if (c.lastProvider.length > 0) {
       const item = c.configs[c.lastProvider];
       if (item !== undefined && item.enabled) {
         const model = c.lastModel.length > 0 && item.models.indexOf(c.lastModel) >= 0
           ? c.lastModel : item.defaultModel;
-        return { provider: c.lastProvider, model: model };
+        const sel: ModelSelectionPersist = { provider: c.lastProvider, model: model };
+        if (effort !== undefined) {
+          sel.effort = effort;
+        }
+        return sel;
       }
     }
     const usable = this.listUsableProviders();
     if (usable.length > 0) {
-      return { provider: usable[0].provider, model: usable[0].defaultModel };
+      const sel: ModelSelectionPersist = { provider: usable[0].provider, model: usable[0].defaultModel };
+      if (effort !== undefined) {
+        sel.effort = effort;
+      }
+      return sel;
     }
-    return { provider: AiProvider.DEEPSEEK, model: PROVIDER_META[AiProvider.DEEPSEEK].defaultModel };
+    const sel: ModelSelectionPersist = { provider: AiProvider.DEEPSEEK, model: PROVIDER_META[AiProvider.DEEPSEEK].defaultModel };
+    if (effort !== undefined) {
+      sel.effort = effort;
+    }
+    return sel;
   }
 
   /** 生成内核 EngineConfig（仅含已配 key 的 provider；无可用时返回 null） */
@@ -339,4 +362,6 @@ export class ConfigService {
 export interface ModelSelectionPersist {
   provider: string;
   model: string;
+  /** k19：思考强度（合法值 off/high/max；缺省=跟随服务端默认） */
+  effort?: string;
 }

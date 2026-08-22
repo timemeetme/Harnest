@@ -1,46 +1,88 @@
 import { ThemeColors, darkTheme } from '../theme/Theme';
-import { UiState, ChatMessage, MessageRole, SessionUi } from '../model/UiModels';
-import { AppViewModel } from '../viewmodel/AppViewModel';
+import { KEY_THEME } from '../service/AppearanceService';
+import { pasteboard } from '@kit.BasicServicesKit';
+import {
+  UiState, ChatMessage, MessageRole, SessionUi, LiveItem,
+  PendingQuestionItem, PendingOption, BgJobUi,
+} from '../model/UiModels';
+import { AppViewModel, QuestionPick } from '../viewmodel/AppViewModel';
 import { ProviderConfig } from '../service/ConfigService';
 import { TodoSnapshotItem } from '../service/HarnessNative';
+import { EffortOption } from '../common/Constants';
+import { MarkdownView } from './MarkdownView';
 
 /**
  * 对话页：会话抽屉 + 消息流 + 模型选择器（TRAE 式）。
- * 模型选择按对话粒度保存；选择器展示已配置 key 的 provider 及其模型。
+ * 模型选择按对话粒度保存；选择器展示已配置 key 的 provider 及其模型 + 思考模式钻取。
+ * 实时活动面板（思考/工具/待办）对标 Trae/Codex：层级折叠，完成后默认收起。
+ * k 系列 UI：排队续发 / ⚡转向 / 停止 / 提问卡 / 🧭Plan / 🗜压缩 / 后台任务卡 / fork·复制·评分 / Markdown 渲染。
  */
 @Component
 export struct ChatView {
   @ObjectLink @Watch('onStateChanged') state: UiState;
   viewModel: AppViewModel = new AppViewModel();
   onGoSettings: () => void = () => {};
-  private theme: ThemeColors = darkTheme;
+  @StorageProp(KEY_THEME) theme: ThemeColors = darkTheme;
   @State inputText: string = '';
   @State showSessions: boolean = false;
   @State showModelPicker: boolean = false;
   @State providerList: ProviderConfig[] = [];
+  @State liveExpanded: Record<string, boolean> = {};
+  /** k1 模型选择器二级钻取（'provider/model' 非空时展示思考模式行） */
+  @State drillModel: string = '';
+  /** k5 提问卡选择态（questionId → 选中 label 列表） */
+  @State qSel: Record<string, string[]> = {};
+  /** k5 提问卡自由文本（questionId → 输入） */
+  @State qCustom: Record<string, string> = {};
   private scroller: Scroller = new Scroller();
+  /** 上次会话 id：检测会话切换，切换时延迟跳底（等列表重建完） */
+  private lastSessionId: string | null = null;
 
   onStateChanged(): void {
+    const sid = this.state.activeSessionId;
+    if (sid !== this.lastSessionId) {
+      this.lastSessionId = sid;
+      this.scrollToBottomDelayed(180);
+      return;
+    }
     this.scroller.scrollEdge(Edge.Bottom);
+  }
+
+  aboutToAppear(): void {
+    this.lastSessionId = this.state.activeSessionId;
+    this.scrollToBottomDelayed(180);
+  }
+
+  private scrollToBottomDelayed(ms: number): void {
+    setTimeout(() => {
+      this.scroller.scrollEdge(Edge.Bottom);
+    }, ms);
   }
 
   build() {
     Column() {
       this.topBar()
+
+      // 模型选择器（顶栏下拉，对标 ChatGPT）
+      if (this.showModelPicker) {
+        this.modelPicker()
+      }
+
       if (this.state.needsConfig) {
         this.configBanner()
       }
+
+      // k 系列一次性提示条（2.6s 自动消失）
+      if (this.state.toast.length > 0) {
+        this.toastBar()
+      }
+
       Stack({ alignContent: Alignment.Bottom }) {
         Column() {
           this.messageList()
           this.inputArea()
         }
         .width('100%').height('100%')
-
-        // 模型选择器（输入区上方弹出）
-        if (this.showModelPicker) {
-          this.modelPicker()
-        }
       }
       .layoutWeight(1)
       .width('100%')
@@ -69,10 +111,41 @@ export struct ChatView {
       Column() {
         Text(this.activeTitle()).fontSize('16fp').fontColor(this.theme.textPrimary)
           .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.state.engineStatus).fontSize('10fp').fontColor(this.theme.textHint)
+        // 模型 chip（点击弹出选择器，对标 ChatGPT 顶栏）
+        Row({ space: 2 }) {
+          Text(this.activeModelLabel()).fontSize('11fp').fontColor(this.theme.textHint)
+            .maxLines(1).textOverflow({ overflow: TextOverflow.Ellipsis })
+            .constraintSize({ maxWidth: 160 })
+          Text('▾').fontSize('10fp').fontColor(this.theme.textHint)
+        }
+        .padding({ left: 10, right: 10, top: 2, bottom: 2 })
+        .borderRadius(10)
+        .backgroundColor(this.theme.surfaceElevated)
+        .margin({ top: 1 })
+        .onClick(() => {
+          this.providerList = this.viewModel.usableProviders();
+          this.showModelPicker = !this.showModelPicker;
+        })
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
+
+      // k3 手动压缩上下文（回合空闲时可用）
+      Text('🗜').fontSize('16fp')
+        .fontColor(!this.state.isSending && this.state.messages.length > 0
+          ? this.theme.textPrimary : this.theme.textHint)
+        .padding({ left: 6, right: 6, top: 8, bottom: 8 })
+        .onClick(() => {
+          this.viewModel.runCompact();
+        })
+
+      // k8 Plan 模式开关（开启时高亮；🧭 与复制按钮 📋 区分）
+      Text('🧭').fontSize('16fp')
+        .fontColor(this.state.planActive ? this.theme.primary : this.theme.textHint)
+        .padding({ left: 6, right: 6, top: 8, bottom: 8 })
+        .onClick(() => {
+          this.viewModel.togglePlan();
+        })
 
       Text('＋').fontSize('20fp')
         .fontColor(this.theme.textPrimary)
@@ -125,6 +198,24 @@ export struct ChatView {
             this.messageBubble(m)
           }
         }, (m: ChatMessage) => m.id)
+
+        // 发送中的实时活动面板（思考/工具/待办），对标 Trae/Codex。
+        // @Builder 多参数按值快照不会随 state.liveItems 重赋值刷新，
+        // 外包内容签名 ForEach 强制追踪数组引用，逐字到达时重建面板子树。
+        if (this.state.isSending && this.state.liveItems.length > 0) {
+          ForEach([this.state.liveItems], (snap: LiveItem[]) => {
+            ListItem() {
+              this.liveActivityPanel(snap, true, 'live_now')
+            }
+          }, (snap: LiveItem[]) => 'live_host_' + snap.length + '_' + this.liveGroupSig(snap))
+        }
+
+        // k7e 后台任务镜像卡（running/stopping + 终止按钮）
+        if (this.state.bgJobs.length > 0) {
+          ListItem() {
+            this.bgJobsCard()
+          }
+        }
       }
       .layoutWeight(1)
       .width('100%')
@@ -133,124 +224,194 @@ export struct ChatView {
     }
   }
 
+  /** 响应耗时格式化：832ms / 3.4s / 2分13秒 */
+  private fmtDuration(ms: number): string {
+    if (ms < 1000) {
+      return ms + 'ms';
+    }
+    const s = ms / 1000;
+    if (s < 60) {
+      return s.toFixed(1) + 's';
+    }
+    const m = Math.floor(s / 60);
+    return m + '分' + Math.round(s % 60) + '秒';
+  }
+
   @Builder
   messageBubble(m: ChatMessage) {
     if (m.role === MessageRole.User) {
       Column() {
-        Text(m.content).fontSize('15fp').fontColor(this.theme.textPrimary)
+      Column({ space: 3 }) {
+        if (m.steered) {
+            Text('⚡ 转向注入（下一边界生效）').fontSize('9fp').fontColor(this.theme.warning)
+        }
+          Text(m.content).fontSize('15fp').fontColor(this.theme.textPrimary)
+        }
+        .constraintSize({ maxWidth: '80%' })
+        .padding(12)
+        .borderRadius(12)
+        .backgroundColor(this.theme.userBubble)
       }
-      .constraintSize({ maxWidth: '80%' })
-      .padding(12)
-      .borderRadius(12)
-      .backgroundColor(this.theme.userBubble)
-      .alignSelf(ItemAlign.End)
+      .width('100%')
+      .alignItems(HorizontalAlign.End)
     } else if (m.role === MessageRole.Tool) {
       this.toolBubble(m)
     } else {
       Column({ space: 4 }) {
-        if (m.model !== null && m.model !== undefined && m.model.length > 0) {
-          Text(this.viewModel.providerLabel(m.provider ?? '') + ' · ' + m.model)
-            .fontSize('10fp')
-            .fontColor(m.isError ? this.theme.error : this.theme.textHint)
+        // 历史回合轨迹回放（思考/工具步骤），折叠默认收起
+        if (m.traceJson.length > 0) {
+          this.liveActivityPanel(parseTrace(m.traceJson), false, m.id)
         }
-        Text(m.content).fontSize('15fp')
-          .fontColor(m.isError ? this.theme.error : this.theme.textPrimary)
+        Column({ space: 4 }) {
+          if ((m.model !== null && m.model !== undefined && m.model.length > 0) || m.durationMs > 0) {
+            Row({ space: 6 }) {
+              if (m.model !== null && m.model !== undefined && m.model.length > 0) {
+                Text(this.viewModel.providerLabel(m.provider ?? '') + ' · ' + m.model)
+                  .fontSize('10fp')
+                  .fontColor(m.isError ? this.theme.error : this.theme.textHint)
+                  .maxLines(1)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  .flexShrink(1)
+              }
+              if (m.durationMs > 0) {
+                Text('⏱ ' + this.fmtDuration(m.durationMs))
+                  .fontSize('10fp')
+                  .fontColor(m.isError ? this.theme.error : this.theme.textHint)
+              }
+            }
+          }
+          // k8 接线：Markdown 渲染（标题/粗斜/码块/表格/链接/数学降级/@提及）
+          if (m.isError) {
+            Text(m.content).fontSize('15fp').fontColor(this.theme.error)
+          } else {
+            MarkdownView({ text: m.content, theme: this.theme })
+          }
+        }
+        .constraintSize({ maxWidth: '86%' })
+        .padding(12)
+        .borderRadius(12)
+        .backgroundColor(this.theme.assistantBubble)
+
+        // k6 消息尾部操作：评分 / 复制 / fork（错误消息不显示）
+        if (!m.isError) {
+          Row({ space: 4 }) {
+            Text(m.rating === 1 ? '👍' : '👍🏻').fontSize('12fp')
+              .padding(4)
+              .onClick(() => {
+                this.viewModel.setRating(m.id, 1);
+              })
+            Text(m.rating === -1 ? '👎' : '👎🏻').fontSize('12fp')
+              .padding(4)
+              .onClick(() => {
+                this.viewModel.setRating(m.id, -1);
+              })
+            Text('📋').fontSize('12fp')
+              .padding(4)
+              .onClick(() => {
+                this.copyText(m.content);
+              })
+            Text('🍴').fontSize('12fp')
+              .padding(4)
+              .onClick(() => {
+                this.viewModel.forkFromMessage(m.id);
+              })
+          }
+          .padding({ left: 4 })
+        }
       }
-      .constraintSize({ maxWidth: '86%' })
-      .padding(12)
-      .borderRadius(12)
-      .backgroundColor(this.theme.assistantBubble)
-      .alignSelf(ItemAlign.Start)
+      .width('100%')
+      .alignItems(HorizontalAlign.Start)
     }
   }
 
   /** 工具消息气泡：工具名 + 状态 +（todo_write 整表快照 | 结果预览） */
   @Builder
   toolBubble(m: ChatMessage) {
-    Column({ space: 6 }) {
-      Row({ space: 6 }) {
-        Text('⚙').fontSize('12fp')
-          .fontColor(m.toolStatus === 'error' ? this.theme.error : this.theme.primary)
-        Text(m.toolName).fontSize('12fp')
-          .fontColor(this.theme.textPrimary)
-          .layoutWeight(1)
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-        Text(this.toolStatusLabel(m.toolStatus)).fontSize('10fp')
-          .fontColor(this.toolStatusColor(m.toolStatus))
-      }
-      .width('100%')
-
-      if (m.todosJson.length > 0) {
-        Column({ space: 5 }) {
-          ForEach(this.parseTodos(m.todosJson), (t: TodoSnapshotItem, idx: number) => {
-            Row({ space: 7 }) {
-              Text(this.todoGlyph(t.status)).fontSize('12fp')
-                .fontColor(t.status === 'completed' ? this.theme.success
-                  : (t.status === 'in_progress' ? this.theme.primary : this.theme.textHint))
-              Text(t.content).fontSize('12fp')
-                .fontColor(t.status === 'completed' ? this.theme.textHint : this.theme.textPrimary)
-                .layoutWeight(1)
-                .maxLines(2)
-                .textOverflow({ overflow: TextOverflow.Ellipsis })
-            }
-            .width('100%')
-            .alignItems(VerticalAlign.Top)
-          }, (t: TodoSnapshotItem, idx: number) => m.id + '_' + idx)
+    Column() {
+      Column({ space: 6 }) {
+        Row({ space: 6 }) {
+          Text(this.toolGlyph(m.toolName)).fontSize('12fp')
+            .fontColor(m.toolStatus === 'error' ? this.theme.error : this.theme.primary)
+          Text(m.toolName).fontSize('12fp')
+            .fontColor(this.theme.textPrimary)
+            .flexShrink(1)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          Text(this.toolStatusLabel(m.toolStatus)).fontSize('10fp')
+            .fontColor(this.toolStatusColor(m.toolStatus))
         }
-        .width('100%')
-      } else if (m.toolResult.length > 0) {
-        Text(m.toolResult).fontSize('11fp')
-          .fontColor(m.toolStatus === 'error' ? this.theme.error : this.theme.textHint)
-          .maxLines(4)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
-          .width('100%')
+
+        if (m.todosJson.length > 0) {
+          Column({ space: 5 }) {
+            ForEach(this.parseTodos(m.todosJson), (t: TodoSnapshotItem, idx: number) => {
+              Row({ space: 7 }) {
+                Text(this.todoGlyph(t.status)).fontSize('12fp')
+                  .fontColor(t.status === 'completed' ? this.theme.success
+                    : (t.status === 'in_progress' ? this.theme.primary : this.theme.textHint))
+                Text(t.content).fontSize('12fp')
+                  .fontColor(t.status === 'completed' ? this.theme.textHint : this.theme.textPrimary)
+                  .flexShrink(1)
+                  .maxLines(2)
+                  .textOverflow({ overflow: TextOverflow.Ellipsis })
+              }
+              .alignItems(VerticalAlign.Top)
+            }, (t: TodoSnapshotItem, idx: number) => m.id + '_' + idx)
+          }
+        } else if (m.toolResult.length > 0) {
+          Text(m.toolResult).fontSize('11fp')
+            .fontColor(m.toolStatus === 'error' ? this.theme.error : this.theme.textHint)
+            .maxLines(4)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
       }
+      .constraintSize({ maxWidth: '86%' })
+      .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+      .borderRadius(10)
+      .backgroundColor(this.theme.surfaceElevated)
+      .border({
+        width: { left: 2 },
+        color: m.toolStatus === 'error' ? this.theme.error
+          : (m.toolStatus === 'running' ? this.theme.warning : this.theme.divider)
+      })
     }
-    .constraintSize({ maxWidth: '86%' })
-    .padding({ left: 10, right: 10, top: 8, bottom: 8 })
-    .borderRadius(10)
-    .backgroundColor(this.theme.surfaceElevated)
-    .border({
-      width: { left: 2 },
-      color: m.toolStatus === 'error' ? this.theme.error
-        : (m.toolStatus === 'running' ? this.theme.warning : this.theme.divider)
-    })
-    .alignSelf(ItemAlign.Start)
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
   }
 
-  // ── 输入区（含模型 chip） ────────────────────────────────────
+  // ── 输入区 ──────────────────────────────────────────────────
 
   @Builder
   inputArea() {
     Column({ space: 6 }) {
-      Row() {
-        // 模型 chip：当前会话的模型选择（对话粒度保存）
-        Row({ space: 4 }) {
-          Text(this.viewModel.providerLabel(this.activeProvider()) + ' · ' + this.activeModel())
-            .fontSize('12fp')
-            .fontColor(this.theme.textPrimary)
-            .maxLines(1)
-            .constraintSize({ maxWidth: 220 })
-          Text('▾').fontSize('10fp').fontColor(this.theme.textHint)
-        }
-        .padding({ left: 10, right: 10, top: 5, bottom: 5 })
-        .borderRadius(14)
-        .backgroundColor(this.theme.surfaceElevated)
-        .onClick(() => {
-          this.providerList = this.viewModel.usableProviders();
-          this.showModelPicker = !this.showModelPicker;
-        })
-
-        if (this.state.isSending) {
-          Text('回复中…').fontSize('11fp').fontColor(this.theme.textHint)
-            .margin({ left: 8 })
-        }
+      // k5 提问卡（等待用户回答 — 悬浮于输入区上方，不随列表滚动）
+      if (this.state.pendingQuestion !== null) {
+        this.questionCard()
       }
-      .width('100%')
+
+      // 忙时提示 + k4 排队气泡
+      if (this.state.isSending || this.state.busyHint.length > 0) {
+        Row({ space: 8 }) {
+          Text(this.state.busyHint.length > 0 ? this.state.busyHint : '回复中…')
+            .fontSize('10fp').fontColor(this.theme.textHint)
+            .layoutWeight(1)
+            .maxLines(1)
+          ForEach(this.state.queuedMessages, (q: string, idx: number) => {
+            Text('⏳ ' + q)
+              .fontSize('9fp')
+              .fontColor(this.theme.textSecondary)
+              .maxLines(1)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .constraintSize({ maxWidth: 120 })
+              .padding({ left: 6, right: 6, top: 2, bottom: 2 })
+              .borderRadius(8)
+              .backgroundColor(this.theme.surfaceElevated)
+          }, (q: string, idx: number) => 'q_' + idx + '_' + q)
+        }
+        .width('100%')
+      }
 
       Row({ space: 8 }) {
-        TextArea({ text: this.inputText, placeholder: '发送消息…' })
+        TextArea({ text: this.inputText, placeholder: this.state.isSending ? '输入 ⚡ 转向指令或排队消息…' : '发送消息…' })
           .fontSize('15fp')
           .fontColor(this.theme.textPrimary)
           .placeholderColor(this.theme.textHint)
@@ -262,18 +423,42 @@ export struct ChatView {
             this.inputText = v;
           })
 
-        Button(this.state.isSending ? '…' : '发送')
-          .fontSize('14fp')
-          .fontColor(this.theme.primaryOn)
-          .backgroundColor(this.state.isSending || this.inputText.trim().length === 0
-            ? this.theme.divider : this.theme.primary)
-          .borderRadius(10)
-          .height(42)
-          .padding({ left: 14, right: 14 })
-          .enabled(!this.state.isSending && this.inputText.trim().length > 0)
-          .onClick(() => {
-            this.send();
-          })
+        // k4 回合进行中：⚡ 转向（下一 step 边界改道）
+        if (this.state.isSending) {
+          Text('⚡').fontSize('18fp')
+            .fontColor(this.inputText.trim().length > 0 ? this.theme.warning : this.theme.textHint)
+            .padding({ left: 4, right: 4 })
+            .onClick(() => {
+              this.steer();
+            })
+        }
+
+        // k6 发送 / 停止双态按钮
+        if (this.state.isSending) {
+          Button('⏹')
+            .fontSize('14fp')
+            .fontColor('#ffffff')
+            .backgroundColor(this.theme.error)
+            .borderRadius(10)
+            .height(42)
+            .padding({ left: 16, right: 16 })
+            .onClick(() => {
+              this.viewModel.stopRound();
+            })
+        } else {
+          Button('发送')
+            .fontSize('14fp')
+            .fontColor(this.theme.primaryOn)
+            .backgroundColor(this.inputText.trim().length === 0
+              ? this.theme.divider : this.theme.primary)
+            .borderRadius(10)
+            .height(42)
+            .padding({ left: 14, right: 14 })
+            .enabled(this.inputText.trim().length > 0)
+            .onClick(() => {
+              this.send();
+            })
+        }
       }
       .width('100%')
       .alignItems(VerticalAlign.Bottom)
@@ -284,25 +469,27 @@ export struct ChatView {
     .border({ width: { top: 0.5 }, color: this.theme.divider })
   }
 
+  /** k4 ⚡ 转向发送 */
+  private steer(): void {
+    const text = this.inputText;
+    if (text.trim().length === 0) {
+      return;
+    }
+    this.inputText = '';
+    this.viewModel.steerMessage(text);
+  }
+
   @Builder
   modelPicker() {
-    Column() {
-      // 空白区点击关闭
-      Column()
-        .width('100%')
-        .layoutWeight(0)
-        .onClick(() => {
-          this.showModelPicker = false;
-        })
-
-      Scroll() {
-        Column({ space: 2 }) {
-          ForEach(this.providerList, (p: ProviderConfig) => {
-            Column({ space: 2 }) {
-              Text(this.viewModel.providerLabel(p.provider)).fontSize('11fp')
-                .fontColor(this.theme.textHint)
-                .padding({ top: 8, bottom: 4, left: 12 })
-              ForEach(p.models, (model: string) => {
+    Scroll() {
+      Column({ space: 2 }) {
+        ForEach(this.providerList, (p: ProviderConfig) => {
+          Column({ space: 2 }) {
+            Text(this.viewModel.providerLabel(p.provider)).fontSize('11fp')
+              .fontColor(this.theme.textHint)
+              .padding({ top: 8, bottom: 4, left: 12 })
+            ForEach(p.models, (model: string) => {
+              Column({ space: 0 }) {
                 Row() {
                   Text(model).fontSize('14fp')
                     .fontColor(this.isActiveModel(p.provider, model)
@@ -311,30 +498,68 @@ export struct ChatView {
                   if (this.isActiveModel(p.provider, model)) {
                     Text('✓').fontSize('14fp').fontColor(this.theme.primary)
                   }
+                  // k1 钻取指示
+                  Text(this.drillModel === p.provider + '/' + model ? '▴' : '▾')
+                    .fontSize('10fp').fontColor(this.theme.textHint)
+                    .margin({ left: 6 })
                 }
                 .width('100%')
                 .padding({ left: 20, right: 12, top: 9, bottom: 9 })
                 .borderRadius(8)
                 .onClick(() => {
-                  this.viewModel.setSessionModel(p.provider, model);
-                  this.showModelPicker = false;
+                  // 点击模型 → 展开思考模式二级选项（默认/关闭/标准/最高）
+                  this.drillModel = this.drillModel === p.provider + '/' + model
+                    ? '' : p.provider + '/' + model;
                 })
-              }, (model: string) => p.provider + '/' + model)
-            }
-            .width('100%')
-          }, (p: ProviderConfig) => p.provider)
-        }
-        .width('100%')
-        .padding({ bottom: 8 })
+
+                // k1 思考模式钻取层
+                if (this.drillModel === p.provider + '/' + model) {
+                  Column({ space: 0 }) {
+                    ForEach(this.viewModel.effortOptions(), (opt: EffortOption) => {
+                      Row({ space: 6 }) {
+                        Column({ space: 1 }) {
+                          Text(opt.label).fontSize('13fp')
+                            .fontColor(this.isActiveEffort(opt.value)
+                              ? this.theme.primary : this.theme.textPrimary)
+                          Text(opt.hint).fontSize('9fp').fontColor(this.theme.textHint)
+                        }
+                        .alignItems(HorizontalAlign.Start)
+                        .layoutWeight(1)
+                        if (this.isActiveEffort(opt.value)) {
+                          Text('✓').fontSize('12fp').fontColor(this.theme.primary)
+                        }
+                      }
+                      .width('100%')
+                      .padding({ left: 32, right: 12, top: 7, bottom: 7 })
+                      .borderRadius(8)
+                      .onClick(() => {
+                        this.viewModel.setSessionModel(p.provider, model, opt.value ?? '');
+                        this.drillModel = '';
+                        this.showModelPicker = false;
+                      })
+                    }, (opt: EffortOption) => p.provider + '/' + model + '/' + opt.label)
+                  }
+                  .width('100%')
+                  .borderRadius(8)
+                  .backgroundColor(this.theme.surface)
+                }
+              }
+              .width('100%')
+            }, (model: string) => p.provider + '/' + model)
+          }
+          .width('100%')
+        }, (p: ProviderConfig) => p.provider)
       }
-      .scrollBar(BarState.Off)
       .width('100%')
-      .constraintSize({ maxHeight: 340 })
-      .borderRadius({ topLeft: 16, topRight: 16 })
-      .backgroundColor(this.theme.surfaceElevated)
-      .border({ width: { top: 0.5 }, color: this.theme.divider })
+      .padding({ bottom: 8, top: 2 })
     }
+    .scrollBar(BarState.Off)
     .width('100%')
+    .constraintSize({ maxHeight: 340 })
+    .borderRadius({ bottomLeft: 16, bottomRight: 16 })
+    .backgroundColor(this.theme.surfaceElevated)
+    .border({ width: { bottom: 0.5, left: 0.5, right: 0.5 }, color: this.theme.divider })
+    .margin({ left: 8, right: 8 })
   }
 
   // ── 会话抽屉 ────────────────────────────────────────────────
@@ -384,6 +609,7 @@ export struct ChatView {
               .onClick(() => {
                 this.viewModel.selectSession(s.id);
                 this.showSessions = false;
+                this.scrollToBottomDelayed(180);
               })
             }
           }, (s: SessionUi) => s.id)
@@ -418,6 +644,7 @@ export struct ChatView {
       return;
     }
     this.inputText = '';
+    this.liveExpanded = {};
     this.viewModel.sendMessage(text);
   }
 
@@ -488,4 +715,653 @@ export struct ChatView {
     if (status === 'running') return this.theme.warning;
     return this.theme.textHint;
   }
+
+  /** 工具名 → 分类图标（轨迹卡片视觉分类，对齐 Android ToolCard） */
+  private toolGlyph(name: string): string {
+    const n = name.toLowerCase();
+    if (n.indexOf('search') >= 0 || n.indexOf('web') >= 0 || n.indexOf('fetch') >= 0) return '🌐';
+    if (n.indexOf('grep') >= 0 || n.indexOf('glob') >= 0) return '🔎';
+    if (n.indexOf('bash') >= 0 || n.indexOf('shell') >= 0 || n.indexOf('exec') >= 0
+      || n.indexOf('terminal') >= 0 || n.indexOf('command') >= 0) return '💻';
+    if (n.indexOf('artifact') >= 0) return '📦';
+    if (n.indexOf('todo') >= 0) return '🗒';
+    if (n.indexOf('task') >= 0 || n.indexOf('agent') >= 0 || n.indexOf('dispatch') >= 0) return '🤖';
+    if (n.indexOf('read') >= 0 || n.indexOf('write') >= 0 || n.indexOf('edit') >= 0
+      || n.indexOf('file') >= 0 || n.indexOf('patch') >= 0) return '📄';
+    return '⚙️';
+  }
+
+  /** k6 复制消息全文到系统剪贴板 */
+  private copyText(text: string): void {
+    try {
+      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, text);
+      pasteboard.getSystemPasteboard().setData(data).then(() => {
+        this.state.toast = '已复制';
+      }).catch(() => {
+        this.state.toast = '复制失败';
+      });
+    } catch (_e) {
+      this.state.toast = '复制失败';
+    }
+  }
+
+  /** k1 当前会话思考强度匹配（null=默认 ↔ effort 空串） */
+  private isActiveEffort(value: string | null): boolean {
+    const s = this.activeSession();
+    if (s === null) {
+      return false;
+    }
+    if (value === null) {
+      return s.effort.length === 0;
+    }
+    return s.effort === value;
+  }
+
+  /** k 系列一次性提示条（2.6s 自动消失；点击立即关闭；内容比对防连发竞态） */
+  @Builder
+  toastBar() {
+    Row() {
+      Text(this.state.toast).fontSize('12fp').fontColor(this.theme.textPrimary)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
+      Text('✕').fontSize('11fp').fontColor(this.theme.textHint).padding(4)
+    }
+    .width('100%')
+    .padding({ left: 12, right: 6, top: 6, bottom: 6 })
+    .backgroundColor(this.theme.surfaceElevated)
+    .border({ width: { bottom: 0.5 }, color: this.theme.divider })
+    .onClick(() => {
+      this.state.toast = '';
+    })
+    .onAppear(() => {
+      const cur = this.state.toast;
+      setTimeout(() => {
+        if (this.state.toast === cur) {
+          this.state.toast = '';
+        }
+      }, 2600);
+    })
+  }
+
+  /** k7e 后台任务镜像卡（running/stopping + 终止按钮） */
+  @Builder
+  bgJobsCard() {
+    Column({ space: 4 }) {
+      ForEach(this.state.bgJobs, (j: BgJobUi) => {
+        Row({ space: 6 }) {
+          Text(j.status === 'stopping' ? '⏹' : '⏳').fontSize('12fp')
+            .fontColor(j.status === 'stopping' ? this.theme.warning : this.theme.primary)
+          Text(j.label).fontSize('12fp').fontColor(this.theme.textSecondary)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1)
+          if (j.status === 'running') {
+            Text('终止').fontSize('10fp').fontColor(this.theme.error)
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .borderRadius(8)
+              .backgroundColor(this.theme.surface)
+              .onClick(() => {
+                this.viewModel.killBgJob(j.id);
+              })
+          } else {
+            Text('终止中…').fontSize('10fp').fontColor(this.theme.textHint)
+          }
+        }
+        .width('100%')
+        .alignItems(VerticalAlign.Center)
+      }, (j: BgJobUi) => j.id + '_' + j.status)
+    }
+    .width('100%')
+    .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+    .borderRadius(12)
+    .backgroundColor(this.theme.surfaceElevated)
+    .alignSelf(ItemAlign.Start)
+  }
+
+  /** k5 提问卡：qid 下若干问题（单选/多选 + 自由输入），提交组包 answerPendingQuestion */
+  @Builder
+  questionCard() {
+    Column({ space: 8 }) {
+      Text(this.state.pendingQuestion?.planReview === true ? '🧭 计划待审批' : '❓ 等待你的回答')
+        .fontSize('13fp').fontColor(this.theme.warning).fontWeight(FontWeight.Medium)
+
+      ForEach(this.state.pendingQuestion?.questions ?? [], (q: PendingQuestionItem) => {
+        Column({ space: 5 }) {
+          Row({ space: 6 }) {
+            Text(q.header.length > 0 ? q.header : '问题 ' + (q.id + 1))
+              .fontSize('11fp').fontColor(this.theme.textHint)
+            if (q.multiSelect) {
+              Text('可多选').fontSize('9fp').fontColor(this.theme.textHint)
+                .padding({ left: 5, right: 5, top: 1, bottom: 1 })
+                .borderRadius(6)
+                .backgroundColor(this.theme.surface)
+            }
+          }
+          .width('100%')
+
+          Text(q.question).fontSize('13fp').fontColor(this.theme.textPrimary)
+            .width('100%')
+
+          if (q.detail.length > 0) {
+            Text(q.detail).fontSize('10fp').fontColor(this.theme.textSecondary)
+              .width('100%')
+          }
+
+          ForEach(q.options, (opt: PendingOption, oi: number) => {
+            Row({ space: 6 }) {
+              Text(this.qSel[q.id.toString()]?.indexOf(opt.label) >= 0 ? '☑' : '☐')
+                .fontSize('13fp')
+                .fontColor(this.qSel[q.id.toString()]?.indexOf(opt.label) >= 0
+                  ? this.theme.primary : this.theme.textHint)
+              Column({ space: 1 }) {
+                Row({ space: 4 }) {
+                  Text(opt.label).fontSize('12fp')
+                    .fontColor(this.qSel[q.id.toString()]?.indexOf(opt.label) >= 0
+                      ? this.theme.primary : this.theme.textPrimary)
+                  if (opt.isApprove) {
+                    Text('批准').fontSize('8fp').fontColor(this.theme.primaryOn)
+                      .padding({ left: 4, right: 4, top: 1, bottom: 1 })
+                      .borderRadius(4)
+                      .backgroundColor(this.theme.primary)
+                  }
+                }
+                if (opt.description.length > 0) {
+                  Text(opt.description).fontSize('9fp').fontColor(this.theme.textHint)
+                    .maxLines(2)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
+              }
+              .alignItems(HorizontalAlign.Start)
+              .layoutWeight(1)
+            }
+            .width('100%')
+            .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+            .borderRadius(8)
+            .backgroundColor(this.qSel[q.id.toString()]?.indexOf(opt.label) >= 0
+              ? this.theme.surface : Color.Transparent)
+            .onClick(() => {
+              this.togglePick(q, opt.label);
+            })
+          }, (opt: PendingOption, oi: number) => q.id + '_' + opt.label)
+
+          TextArea({ text: this.qCustom[q.id.toString()] ?? '', placeholder: '补充说明（可选）…' })
+            .fontSize('12fp')
+            .fontColor(this.theme.textPrimary)
+            .placeholderColor(this.theme.textHint)
+            .backgroundColor(this.theme.surface)
+            .borderRadius(8)
+            .constraintSize({ minHeight: 34, maxHeight: 72 })
+            .width('100%')
+            .onChange((v: string) => {
+              this.setCustom(q.id, v);
+            })
+        }
+        .width('100%')
+        .padding({ top: 4, bottom: 4 })
+      }, (q: PendingQuestionItem) => 'pq_' + q.id)
+
+      Button('提交回答')
+        .fontSize('13fp')
+        .fontColor(this.theme.primaryOn)
+        .backgroundColor(this.theme.primary)
+        .borderRadius(8)
+        .height(36)
+        .width('100%')
+        .onClick(() => {
+          this.submitAnswers();
+        })
+    }
+    .width('100%')
+    .padding(12)
+    .borderRadius(12)
+    .backgroundColor(this.theme.surfaceElevated)
+    .border({ width: 0.5, color: this.theme.divider })
+  }
+
+  /** k5 选项点选（单选互斥 / 多选切换），整体替换 qSel 触发刷新 */
+  private togglePick(q: PendingQuestionItem, label: string): void {
+    const key = q.id.toString();
+    const cur: string[] = this.qSel[key] ?? [];
+    let next: string[];
+    if (q.multiSelect) {
+      next = cur.indexOf(label) >= 0
+        ? cur.filter((l: string) => l !== label)
+        : cur.concat([label]);
+    } else {
+      next = cur.indexOf(label) >= 0 ? [] : [label];
+    }
+    const map: Record<string, string[]> = {};
+    const keys = Object.keys(this.qSel);
+    for (const k of keys) {
+      map[k] = this.qSel[k];
+    }
+    map[key] = next;
+    this.qSel = map;
+  }
+
+  /** k5 自由输入写入，整体替换 qCustom 触发刷新 */
+  private setCustom(qid: number, v: string): void {
+    const map: Record<string, string> = {};
+    const keys = Object.keys(this.qCustom);
+    for (const k of keys) {
+      map[k] = this.qCustom[k];
+    }
+    map[qid.toString()] = v;
+    this.qCustom = map;
+  }
+
+  /** k5 组包提交（键=问题 id；selected + custom），提交后清空选择态 */
+  private submitAnswers(): void {
+    const pq = this.state.pendingQuestion;
+    if (pq === null) {
+      return;
+    }
+    const picks: Record<string, QuestionPick> = {};
+    for (const q of pq.questions) {
+      const sel: string[] = this.qSel[q.id.toString()] ?? [];
+      const cust = this.qCustom[q.id.toString()] ?? '';
+      const pick: QuestionPick = { selected: sel };
+      if (cust.trim().length > 0) {
+        pick.custom = cust.trim();
+      }
+      picks[q.id.toString()] = pick;
+    }
+    this.qSel = {};
+    this.qCustom = {};
+    this.viewModel.answerPendingQuestion(picks);
+  }
+
+  // ── 实时活动面板（对标 Trae/Codex 的执行过程展示） ─────────
+
+  private activeModelLabel(): string {
+    const s = this.activeSession();
+    if (s !== null && s.model.length > 0) {
+      return s.model;
+    }
+    return '选择模型';
+  }
+
+  /** 折叠状态读取：key 未记录时用默认值（发送中跟随展开 / 完成后收起）。 */
+  private isLiveOpen(key: string, def: boolean): boolean {
+    return this.liveExpanded[key] === undefined ? def : this.liveExpanded[key] === true;
+  }
+
+  /** 折叠状态写入：def 为该 key 的默认态（首次点击时取反当前有效状态），整体替换触发刷新。 */
+  private toggleLive(key: string, def: boolean): void {
+    const cur = this.isLiveOpen(key, def);
+    const next: Record<string, boolean> = {};
+    const keys = Object.keys(this.liveExpanded);
+    for (let i = 0; i < keys.length; i++) {
+      next[keys[i]] = this.liveExpanded[keys[i]] === true;
+    }
+    next[key] = !cur;
+    this.liveExpanded = next;
+  }
+
+  /** 相邻思考段归为一组，其余条目独立成组，供面板分层渲染。 */
+  private groupLiveItems(items: LiveItem[]): LiveItem[][] {
+    const groups: LiveItem[][] = [];
+    let i = 0;
+    while (i < items.length) {
+      if (items[i].kind === 'think') {
+        let j = i;
+        while (j < items.length && items[j].kind === 'think') {
+          j++;
+        }
+        groups.push(items.slice(i, j));
+        i = j;
+      } else {
+        groups.push([items[i]]);
+        i++;
+      }
+    }
+    return groups;
+  }
+
+  /** 组内容签名：流式归并为同索引原位替换，索引 key 会被 ArkUI 复用而跳过重渲染，签名入 key 强制刷新。 */
+  private liveGroupSig(group: LiveItem[]): string {
+    const parts: string[] = [];
+    for (const it of group) {
+      if (it.kind === 'tool') {
+        parts.push(it.kind + it.callId + '_' + it.status + '_' + it.result.length);
+      } else if (it.kind === 'todos') {
+        parts.push(it.kind + '_' + it.todos.length + '_' + this.doneCount(it));
+      } else if (it.kind === 'subagent') {
+        parts.push(it.kind + it.name + '_' + it.status + '_' + it.result.length);
+      } else {
+        parts.push(it.kind + it.seq + '_' + it.text.length);
+      }
+    }
+    return parts.join('-');
+  }
+
+  private toolCount(items: LiveItem[]): number {
+    let n = 0;
+    for (const it of items) {
+      if (it.kind === 'tool') {
+        n++;
+      }
+    }
+    return n;
+  }
+
+  private thinkCharCount(items: LiveItem[]): number {
+    let n = 0;
+    for (const it of items) {
+      if (it.kind === 'think') {
+        n += it.text.length;
+      }
+    }
+    return n;
+  }
+
+  private doneCount(item: LiveItem): number {
+    let n = 0;
+    for (const t of item.todos) {
+      if (t.status === 'completed') {
+        n++;
+      }
+    }
+    return n;
+  }
+
+  /**
+   * 实时活动面板：面板级折叠 + 组级折叠，控制信息密度。
+   * isSending=true 默认展开跟随；结束后收成单行摘要，点击展开回看。
+   */
+  @Builder
+  liveActivityPanel(items: LiveItem[], isSending: boolean, panelKey: string) {
+    Column({ space: 6 }) {
+      Row() {
+        Text(isSending ? '●' : '✦')
+          .fontSize('10fp')
+          .fontColor(isSending ? this.theme.primary : this.theme.textHint)
+        Text(isSending ? '正在执行…' : '执行轨迹')
+          .fontSize('13fp')
+          .fontColor(this.theme.textPrimary)
+          .fontWeight(FontWeight.Medium)
+          .margin({ left: 8 })
+          .layoutWeight(1)
+          .maxLines(1)
+        Text(this.toolCount(items) + ' 步 · ' + this.thinkCharCount(items) + ' 字思考')
+          .fontSize('10fp')
+          .fontColor(this.theme.textHint)
+          .maxLines(1)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .onClick(() => {
+        this.toggleLive(panelKey + '_panel', isSending);
+      })
+
+      if (this.isLiveOpen(panelKey + '_panel', isSending)) {
+        ForEach(this.groupLiveItems(items), (group: LiveItem[], idx: number) => {
+          Column() {
+            if (group[0].kind === 'think') {
+              this.thinkGroup(group, isSending && idx === this.groupLiveItems(items).length - 1,
+                panelKey + '_tg' + idx)
+            } else if (group[0].kind === 'tool') {
+              this.toolLiveRow(group[0], panelKey + '_tl' + idx)
+            } else if (group[0].kind === 'answer') {
+              this.answerLiveBlock(group[0], isSending)
+            } else {
+              this.todosLiveBlock(group[0], panelKey + '_td' + idx)
+            }
+          }
+        }, (group: LiveItem[], idx: number) => panelKey + '_g' + idx + '_' + this.liveGroupSig(group))
+      }
+    }
+    .width('100%')
+    .padding({ left: 12, right: 12, top: 10, bottom: 10 })
+    .borderRadius(12)
+    .backgroundColor(this.theme.surfaceElevated)
+    .alignSelf(ItemAlign.Start)
+  }
+
+  /** 思考组（一级折叠）：标题行汇总段数/字数，展开后逐段渲染（段内二级折叠）。 */
+  @Builder
+  thinkGroup(segments: LiveItem[], autoExpand: boolean, key: string) {
+    Column() {
+      Row() {
+        Text(this.isLiveOpen(key, autoExpand) ? '▾' : '▸')
+          .fontSize('11fp')
+          .fontColor(this.theme.textHint)
+        Text('💭').fontSize('12fp').margin({ left: 7 })
+        Text('思考过程' + (segments.length > 1 ? ' · ' + segments.length + ' 段' : ''))
+          .fontSize('13fp')
+          .fontColor(this.theme.textPrimary)
+          .margin({ left: 6 })
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+        Text(this.thinkCharCount(segments) + ' 字')
+          .fontSize('10fp')
+          .fontColor(this.theme.textHint)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .padding({ top: 5, bottom: 5 })
+      .onClick(() => {
+        this.toggleLive(key, autoExpand);
+      })
+
+      if (this.isLiveOpen(key, autoExpand)) {
+        ForEach(segments, (seg: LiveItem, idx: number) => {
+          Column() {
+            if (idx > 0) {
+              Divider()
+                .color(this.theme.divider)
+                .strokeWidth(0.5)
+                .margin({ top: 2, bottom: 2 })
+            }
+            this.thinkSegment(seg, key + '_s' + idx)
+          }
+        }, (seg: LiveItem, idx: number) => key + '_seg' + idx + '_' + seg.seq + '_' + seg.text.length)
+      }
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  /** 单段思考（二级折叠）：默认 3 行截断，点击切换全文。 */
+  @Builder
+  thinkSegment(seg: LiveItem, key: string) {
+    Text(seg.text)
+      .fontSize('12fp')
+      .fontColor(this.theme.textHint)
+      .lineHeight(17)
+      .maxLines(this.isLiveOpen(key + '_full', false) ? 999 : 3)
+      .textOverflow({ overflow: TextOverflow.Ellipsis })
+      .width('100%')
+      .padding({ top: 4, bottom: 4 })
+      .onClick(() => {
+        this.toggleLive(key + '_full', false);
+      })
+  }
+
+  /** 流式答案块：逐字到达的答案正文 + 光标；round 结束后由正式消息气泡接管。 */
+  @Builder
+  answerLiveBlock(ans: LiveItem, isSending: boolean) {
+    Column() {
+      Row() {
+        Text('✍️').fontSize('12fp')
+        Text('回答')
+          .fontSize('13fp')
+          .fontColor(this.theme.textPrimary)
+          .fontWeight(FontWeight.Medium)
+          .margin({ left: 6 })
+          .layoutWeight(1)
+          .maxLines(1)
+        Text(ans.text.length + ' 字')
+          .fontSize('10fp')
+          .fontColor(this.theme.textHint)
+          .maxLines(1)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      Text(isSending ? ans.text + '▍' : ans.text)
+        .fontSize('13fp')
+        .fontColor(this.theme.textPrimary)
+        .lineHeight(19)
+        .width('100%')
+        .padding({ top: 6, bottom: 2 })
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+
+  /** 工具步骤行（一级折叠）：状态色边条 + 名称 + 状态标签，展开看参数与结果。 */
+  @Builder
+  toolLiveRow(tool: LiveItem, key: string) {
+    Column({ space: 4 }) {
+      Row() {
+        Text('⚙️').fontSize('11fp')
+        Text(tool.name)
+          .fontSize('12fp')
+          .fontColor(this.theme.textPrimary)
+          .fontWeight(FontWeight.Medium)
+          .margin({ left: 6 })
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .layoutWeight(1)
+        if (tool.status === 'running') {
+          Text('●').fontSize('8fp').fontColor(this.theme.warning).margin({ left: 4 })
+          Text('▾').fontSize('10fp').fontColor(this.theme.textHint)
+        } else {
+          Text(this.toolStatusLabel(tool.status))
+            .fontSize('10fp')
+            .fontColor(this.toolStatusColor(tool.status))
+        }
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+
+      if (this.isLiveOpen(key, false)) {
+        if (tool.args.length > 0) {
+          Text(tool.args)
+            .fontSize('10fp')
+            .fontColor(this.theme.textHint)
+            .maxLines(4)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+        }
+        if (tool.result.length > 0) {
+          Text(tool.result)
+            .fontSize('10fp')
+            .fontColor(tool.status === 'error' ? this.theme.error : this.theme.textHint)
+            .maxLines(8)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .width('100%')
+        }
+      }
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+    .padding({ left: 8, right: 2, top: 5, bottom: 5 })
+    .border({
+      width: { left: 2 },
+      color: this.toolStatusColor(tool.status)
+    })
+    .onClick(() => {
+      this.toggleLive(key, false);
+    })
+  }
+
+  /** 待办快照（一级折叠）：标题显示进度 done/total，展开为状态图标列表。 */
+  @Builder
+  todosLiveBlock(item: LiveItem, key: string) {
+    Column() {
+      Row() {
+        Text(this.isLiveOpen(key, true) ? '▾' : '▸')
+          .fontSize('11fp')
+          .fontColor(this.theme.textHint)
+        Text('✅ 任务清单')
+          .fontSize('13fp')
+          .fontColor(this.theme.textPrimary)
+          .margin({ left: 7 })
+          .layoutWeight(1)
+          .maxLines(1)
+        Text(this.doneCount(item) + '/' + item.todos.length)
+          .fontSize('10fp')
+          .fontColor(this.theme.textHint)
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .padding({ top: 5, bottom: 5 })
+      .onClick(() => {
+        this.toggleLive(key, true);
+      })
+
+      if (this.isLiveOpen(key, true)) {
+        ForEach(item.todos, (t: TodoSnapshotItem, idx: number) => {
+          Row({ space: 8 }) {
+            Text(this.todoGlyph(t.status))
+              .fontSize('12fp')
+              .fontColor(t.status === 'completed' ? this.theme.success
+                : (t.status === 'in_progress' ? this.theme.primary : this.theme.textHint))
+            Text(t.content)
+              .fontSize('12fp')
+              .fontColor(t.status === 'completed' ? this.theme.textHint : this.theme.textPrimary)
+              .layoutWeight(1)
+              .maxLines(2)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
+          .width('100%')
+          .alignItems(VerticalAlign.Top)
+          .padding({ left: 16 })
+        }, (t: TodoSnapshotItem, idx: number) => key + '_' + idx)
+      }
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
+  }
+}
+
+/**
+ * 从持久化 traceJson 还原活动轨迹（历史消息回看，与 Android parseTrace 同格式）。
+ * 格式：[{"k":"think","t":".."},{"k":"tool","n":"..","a":"..","s":"ok","r":".."},{"k":"todos","l":[[content,status],..]}]
+ */
+export function parseTrace(json: string): LiveItem[] {
+  const out: LiveItem[] = [];
+  try {
+    const parsed = JSON.parse(json) as Record<string, Object>[];
+    if (!Array.isArray(parsed)) {
+      return out;
+    }
+    for (const o of parsed) {
+      const k = o['k'] as string;
+      if (k === 'think') {
+        const item = new LiveItem();
+        item.kind = 'think';
+        item.text = (o['t'] as string) ?? '';
+        out.push(item);
+      } else if (k === 'tool') {
+        const item = new LiveItem();
+        item.kind = 'tool';
+        item.name = (o['n'] as string) ?? '';
+        item.args = (o['a'] as string) ?? '';
+        item.status = (o['s'] as string) ?? 'ok';
+        item.result = (o['r'] as string) ?? '';
+        out.push(item);
+      } else if (k === 'todos') {
+        const l = o['l'] as Object[];
+        if (l !== undefined && l !== null) {
+          const item = new LiveItem();
+          item.kind = 'todos';
+          const arr: TodoSnapshotItem[] = [];
+          for (const pair of l) {
+            const p = pair as string[];
+            arr.push({ content: p[0] ?? '', status: p[1] ?? 'pending' });
+          }
+          item.todos = arr;
+          out.push(item);
+        }
+      }
+    }
+  } catch (_e) {
+    // 解析失败按无轨迹处理
+  }
+  return out;
 }

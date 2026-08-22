@@ -5,12 +5,14 @@
  *   1. 从 rawfile 加载 harness.js → native init（带 onFetch/onCallSettled 回调）
  *   2. callFunc 的 Promise 化（callId → onCallSettled 结算；含同步 settle 早到缓冲）
  *   3. HttpBridge 装配（QuickJS fetch → ohos http 流式执行）
- *   4. 引擎高层 API：engineInit / createSession / chat / setModel / listProviders ...
+ *   4. DeviceBridge 装配（QuickJS __harnessDeviceCall → 通讯录/日历/剪贴板/文件/相册/邮件/拨号/相机/录音/应用）
+ *   5. 引擎高层 API：engineInit / createSession / chat / setModel / listProviders ...
  */
 import harness from 'libharness_napi.so';
 import { common } from '@kit.AbilityKit';
 import util from '@ohos.util';
 import { HttpBridge } from './HttpBridge';
+import { DeviceBridge } from './DeviceBridge';
 
 // ── 与 harness-entry.ts 对齐的类型 ──────────────────────────
 
@@ -96,10 +98,63 @@ export interface ModelSelection {
 
 export interface CreateSessionOpts {
   sessionId: string;
+  /** k3b：种子事件流（.jsonl 全文 — 内核重放历史；缺省=全新会话） */
+  seedJson?: string;
 }
 
 export interface ChatOpts {
   text: string;
+}
+
+/** k4 转向结果：steered=false 表示引擎空闲未注入（UI 降级提示） */
+export interface SteerOutcome {
+  steered: boolean;
+}
+
+/** k3 手动压缩结果 */
+export interface CompactOutcome {
+  /** 'ok' | 'noop' */
+  status: string;
+  shadowedCount: number;
+  shadowedTokens: number;
+}
+
+/** k5 提问回答项 */
+export interface AnswerQuestionItem {
+  id: number;
+  selected: string[];
+  custom?: string;
+}
+
+export interface AnswerQuestionOpts {
+  qid: number;
+  answers: AnswerQuestionItem[];
+}
+
+export interface SetPlanModeOpts {
+  active: boolean;
+}
+
+/** k7e 后台任务 */
+export interface KernelJob {
+  id: string;
+  label: string;
+  /** 'running' | 'stopping' | 'done' … */
+  status: string;
+}
+
+export class NoArgs {
+}
+
+export interface KillJobOpts {
+  id: string;
+}
+
+/** k1 setModel 参数（effort 非空才带 reasoningEffort，空=跟随服务端默认） */
+export interface SetModelInput {
+  provider: string;
+  model: string;
+  reasoningEffort?: string;
 }
 
 export interface ProviderCatalogEntry {
@@ -132,6 +187,7 @@ interface NativeCallbacks {
   onEvent: (eventJson: string) => void;
   onFetch: (fetchId: number, requestJson: string) => void;
   onCallSettled: (callId: number, ok: boolean, json: string) => void;
+  onDevice: (deviceId: number, requestJson: string) => void;
 }
 
 export type EngineEventListener = (type: string, data: object) => void;
@@ -147,6 +203,7 @@ export class HarnessNative {
   }
 
   private http: HttpBridge = new HttpBridge((_id: number, _k: string, _a: string, _b: string) => {});
+  private device: DeviceBridge = new DeviceBridge((_id: number, _ok: boolean, _j: string) => {});
   private pending: Map<number, PendingCall> = new Map();
   private early: Map<number, EarlySettle> = new Map();
   private initialized: boolean = false;
@@ -156,6 +213,18 @@ export class HarnessNative {
     this.http = new HttpBridge((fetchId: number, kind: string, a: string, b: string) => {
       harness.fetchEvent(fetchId, kind, a, b);
     });
+    this.device = new DeviceBridge((deviceId: number, ok: boolean, resultJson: string) => {
+      try {
+        harness.deviceResult(deviceId, ok, resultJson);
+      } catch (e) {
+        console.error('[HarnessNative] deviceResult failed: ' + JSON.stringify(e));
+      }
+    });
+  }
+
+  /** 设备能力桥访问器（自测页可直接调用 dispatch，不经 QuickJS） */
+  deviceBridge(): DeviceBridge {
+    return this.device;
   }
 
   setEventListener(l: EngineEventListener): void {
@@ -191,9 +260,13 @@ export class HarnessNative {
       onCallSettled: (callId: number, ok: boolean, json: string) => {
         this.settle(callId, ok, json);
       },
+      onDevice: (deviceId: number, requestJson: string) => {
+        this.device.dispatch(deviceId, requestJson);
+      },
     };
 
     harness.init(jsCode, cwd, env, cbs);
+    this.device.setContext(context);
     this.initialized = true;
 
     // 引擎内核初始化（Context + 插件 + provider adapter 注册）
@@ -250,8 +323,13 @@ export class HarnessNative {
     return await this.call<ChatOutcome>('chat', opts);
   }
 
-  setModel(provider: string, model: string): void {
-    harness.callFunc('setModel', JSON.stringify({ provider: provider, model: model }));
+  /** k1：设置当前会话模型 + 思考强度（effort 非空才写 reasoningEffort，空=跟随服务端默认） */
+  setModel(provider: string, model: string, effort?: string): void {
+    const args: SetModelInput = { provider: provider, model: model };
+    if (effort !== undefined && effort !== null && effort.length > 0) {
+      args.reasoningEffort = effort;
+    }
+    harness.callFunc('setModel', JSON.stringify(args));
   }
 
   getModel(): ModelSelection {
@@ -270,7 +348,54 @@ export class HarnessNative {
     return envelope.result as ProviderCatalogEntry[];
   }
 
+  // ── k 系列内核 API（callFunc 通用透传 — C++ 桥无需改动） ──
+
+  /** k4 转向：进行中的回合注入补充指令 */
+  async steer(text: string): Promise<SteerOutcome> {
+    const opts: ChatOpts = { text: text };
+    return await this.call<SteerOutcome>('steer', opts);
+  }
+
+  /** k3 手动压缩当前会话历史 */
+  async compactNow(): Promise<CompactOutcome> {
+    return await this.call<CompactOutcome>('compactNow', new NoArgs());
+  }
+
+  /** k5 回答内核提问 */
+  async answerQuestion(qid: number, answers: AnswerQuestionItem[]): Promise<void> {
+    const opts: AnswerQuestionOpts = { qid: qid, answers: answers };
+    await this.call<object>('answerQuestion', opts);
+  }
+
+  /** k6 Plan 模式开关 */
+  async setPlanMode(active: boolean): Promise<void> {
+    const opts: SetPlanModeOpts = { active: active };
+    await this.call<object>('setPlanMode', opts);
+  }
+
+  /** k7e 查询后台任务列表 */
+  async listJobs(): Promise<KernelJob[]> {
+    return await this.call<KernelJob[]>('listJobs', new NoArgs());
+  }
+
+  /** k7e 终止后台任务 */
+  async killJob(id: string): Promise<void> {
+    const opts: KillJobOpts = { id: id };
+    await this.call<object>('killJob', opts);
+  }
+
+  /** k 停止当前回合（内核 abortActive + 取消全部在途 HTTP） */
+  abortActiveRound(): void {
+    try {
+      harness.callFunc('abortActive', '');
+    } catch (e) {
+      console.error('[HarnessNative] abortActive failed: ' + JSON.stringify(e));
+    }
+    this.http.abortAll();
+  }
+
   dispose(): void {
+    this.device.dispose();
     this.http.abortAll();
     this.pending.forEach((p: PendingCall) => {
       p.reject(new Error('engine disposed'));

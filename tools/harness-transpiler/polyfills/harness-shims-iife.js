@@ -1,4 +1,4 @@
-﻿(function(global) {
+(function(global) {
   const shims = {};
 
   // ── crypto ──
@@ -36,12 +36,26 @@
   shims.module = { createRequire: shims.createRequire };
 
   // ── async_hooks ──
+  // QuickJS polyfill: preserve the store across async boundaries by delaying
+  // restoration until a returned Promise settles. Node's real AsyncLocalStorage
+  // propagates the store through the async context chain; this approximation
+  // keeps the store active for the full lifetime of the operation's Promise.
   shims.AsyncLocalStorage = class {
     constructor() { this._store = new Map(); }
     run(store, fn, ...args) {
       const prev = this._store.get("current");
       this._store.set("current", store);
-      try { return fn(...args); } finally { this._store.set("current", prev); }
+      let result;
+      try { result = fn(...args); } catch (e) { this._store.set("current", prev); throw e; }
+      if (result && typeof result.then === "function") {
+        const self = this;
+        return result.then(
+          function(v) { self._store.set("current", prev); return v; },
+          function(err) { self._store.set("current", prev); throw err; }
+        );
+      }
+      this._store.set("current", prev);
+      return result;
     }
     getStore() { return this._store.get("current"); }
     exit(fn, ...args) { return fn(...args); }
@@ -52,6 +66,23 @@
   // ── util/types ──
   shims.isPromise = function(v) {
     return v && typeof v.then === "function" && typeof v.catch === "function";
+  };
+
+  // ── util.isDeepStrictEqual ──
+  // compaction assertStable 用它比较 surface 节点/seq 数组（稳定性检查）。
+  // 语义对齐 node:util：Object.is 原始值语义（NaN 相等、±0 不等），原型不参与。
+  shims.isDeepStrictEqual = function isDeepStrictEqual(a, b) {
+    if (Object.is(a, b)) return true;
+    if (typeof a !== "object" || typeof b !== "object" || a === null || b === null) return false;
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    for (let i = 0; i < ka.length; i++) {
+      const k = ka[i];
+      if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
+      if (!isDeepStrictEqual(a[k], b[k])) return false;
+    }
+    return true;
   };
 
   // ── path ──

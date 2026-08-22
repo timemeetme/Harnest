@@ -18,6 +18,14 @@ if (!existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true })
 const ENTRY_TS = path.join(__dirname, 'src', 'harness-entry.ts')
 const ENTRY_COPY = path.join(HEADLESS_DIR, 'harness-entry.ts')
 copyFileSync(ENTRY_TS, ENTRY_COPY)
+// device-tools.ts 与入口同目录相互导入，须一并拷入
+const DEVICE_TOOLS_TS = path.join(__dirname, 'src', 'device-tools.ts')
+const DEVICE_TOOLS_COPY = path.join(HEADLESS_DIR, 'device-tools.ts')
+copyFileSync(DEVICE_TOOLS_TS, DEVICE_TOOLS_COPY)
+// capability-manual.ts（本机能力手册数据+检索）同目录导入
+const MANUAL_TS = path.join(__dirname, 'src', 'capability-manual.ts')
+const MANUAL_COPY = path.join(HEADLESS_DIR, 'capability-manual.ts')
+copyFileSync(MANUAL_TS, MANUAL_COPY)
 
 console.log('='.repeat(60))
 console.log('Harness Transpiler — Step 1: Bundle')
@@ -30,7 +38,8 @@ try {
   const result = await build({
     entryPoints: [ENTRY_COPY],
     bundle: true,
-    format: 'esm',
+    format: 'iife',
+    globalName: '__HarnessBundle',
     platform: 'node',
     target: 'node20',
     logLevel: 'info',

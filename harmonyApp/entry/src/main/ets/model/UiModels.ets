@@ -3,6 +3,8 @@
  * @Observed 类仅追踪顶层属性 — 数组变更通过整体替换触发。
  */
 
+import { TodoSnapshotItem } from '../service/HarnessNative';
+
 export enum MessageRole {
   User = 'user',
   Assistant = 'assistant',
@@ -33,6 +35,66 @@ export class ChatMessage {
   toolResult: string = '';
   /** todo_write 消息携带的整表快照（JSON 数组，空串=无） */
   todosJson: string = '';
+  /** assistant 消息：本轮响应耗时（毫秒，0=未记录） */
+  durationMs: number = 0;
+  /** assistant 消息：执行轨迹 JSON（思考/工具/待办/转向/子代理，空串=无） */
+  traceJson: string = '';
+  /** k4：用户消息为 ⚡ 转向注入（下一 step 边界生效） */
+  steered: boolean = false;
+  /** k6：消息评分 1 赞 / -1 踩 / 0 无 */
+  rating: number = 0;
+}
+
+/**
+ * 实时回合活动条目（内核 round 事件归并而来）。
+ * kind='think'：seq/text 有效；kind='tool'：callId/name/args/status/result 有效；
+ * kind='todos'：todos 有效（整表快照）；
+ * kind='steer'（k4 转向注入预告）：text 有效；
+ * kind='subagent'（子代理）：name=label、status=phase（running…）、result=outcome。
+ */
+export class LiveItem {
+  kind: string = 'think';
+  seq: number = 0;
+  text: string = '';
+  callId: string = '';
+  name: string = '';
+  args: string = '';
+  status: string = '';
+  result: string = '';
+  todos: TodoSnapshotItem[] = [];
+}
+
+/** k5 提问选项 */
+export class PendingOption {
+  label: string = '';
+  description: string = '';
+  /** plan-review 变体：该选项为「批准」动作（点选即批准计划，显示批准徽标） */
+  isApprove: boolean = false;
+}
+
+/** k5 单个提问 */
+export class PendingQuestionItem {
+  id: number = 0;
+  question: string = '';
+  detail: string = '';
+  header: string = '';
+  multiSelect: boolean = false;
+  options: PendingOption[] = [];
+}
+
+/** k5 提问卡（当前等待用户回答的一组问题；qid 对应内核 answerQuestion） */
+export class PendingQuestion {
+  qid: number = 0;
+  questions: PendingQuestionItem[] = [];
+  /** plan-review 变体（任一选项带批准意图）— 标题变「🧭 计划待审批」 */
+  planReview: boolean = false;
+}
+
+/** k7e 后台任务镜像（只保留 running/stopping） */
+export class BgJobUi {
+  id: string = '';
+  label: string = '';
+  status: string = 'running';
 }
 
 export class SessionUi {
@@ -43,6 +105,8 @@ export class SessionUi {
   createdAt: number = 0;
   updatedAt: number = 0;
   messageCount: number = 0;
+  /** k19：思考强度（空串=跟随服务端默认；按会话保存） */
+  effort: string = '';
 }
 
 @Observed
@@ -52,10 +116,24 @@ export class UiState {
   messages: ChatMessage[] = [];
   /** 发送中（等待内核回合结束） */
   isSending: boolean = false;
+  /** 本轮实时活动条目（思考/工具/待办/转向/子代理，回合结束后随 assistant 消息落盘） */
+  liveItems: LiveItem[] = [];
   /** 尚未配置任何大模型 API */
   needsConfig: boolean = true;
   /** 引擎状态文本（状态条显示） */
   engineStatus: string = '内核未启动';
+  /** k4：排队待发消息（busy 时入队，本轮结束自动续发；停止清空） */
+  queuedMessages: string[] = [];
+  /** k5：当前待回答提问卡（null=无；busyHint 同步「等待你的回答…」） */
+  pendingQuestion: PendingQuestion | null = null;
+  /** k6：Plan 模式开关态（与内核 setPlanMode 同步） */
+  planActive: boolean = false;
+  /** k7e：后台任务镜像（只留 running/stopping） */
+  bgJobs: BgJobUi[] = [];
+  /** 忙时提示条（等待回答/压缩中等；空串=隐藏） */
+  busyHint: string = '';
+  /** 一次性提示（ChatView 渲染 toast 条后由 UI 定时清空） */
+  toast: string = '';
   widthClass: WindowWidthClass = WindowWidthClass.Compact;
 }
 
