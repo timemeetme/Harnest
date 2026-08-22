@@ -68,11 +68,11 @@ jobs:
         with:
           version: 11
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js 22
         if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: pnpm
           cache-dependency-path: |
             kernel/deepseek-harness/pnpm-lock.yaml
