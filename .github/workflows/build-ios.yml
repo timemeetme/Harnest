@@ -101,7 +101,7 @@ jobs:
         working-directory: iosApp
         run: |
           xcodebuild build \
-            -project HarnessApp.xcodeproj \
+            -project Harnest.xcodeproj \
             -scheme ${{ env.XCODE_SCHEME }} \
             -destination 'generic/platform=iOS' \
             -configuration Release \
@@ -112,21 +112,20 @@ jobs:
         working-directory: iosApp
         run: |
           xcodebuild archive \
-            -project HarnessApp.xcodeproj \
+            -project Harnest.xcodeproj \
             -scheme ${{ env.XCODE_SCHEME }} \
             -destination 'generic/platform=iOS' \
             -configuration Release \
-            -archivePath build/HarnessApp.xcarchive \
+            -archivePath build/Harnest.xcarchive \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO
 
       - name: Export IPA
         working-directory: iosApp
         run: |
-          cp ../iosApp/ExportOptions.plist ExportOptions.plist 2>/dev/null || true
           xcodebuild \
             -exportArchive \
-            -archivePath build/HarnessApp.xcarchive \
+            -archivePath build/Harnest.xcarchive \
             -exportPath build/export \
             -exportOptionsPlist ExportOptions.plist \
             || echo "Export failed (signing may be missing) — artifact is still available via upload of .app"
@@ -150,9 +149,9 @@ jobs:
 
       - name: Upload .app bundle (fallback)
         uses: actions/upload-artifact@v4
-        if: hashFiles('iosApp/build/export/*.ipa') == '' && hashFiles('iosApp/build/Release-iphoneos/*.app') != ''
+        if: hashFiles('iosApp/build/export/*.ipa') == '' && hashFiles('iosApp/build/Harnest.xcarchive/Products/Applications/*.app') != ''
         with:
           name: ios-app-${{ github.sha }}
-          path: iosApp/build/Release-iphoneos/*.app
+          path: iosApp/build/Harnest.xcarchive/Products/Applications/*.app
           retention-days: 7
           if-no-files-found: error
