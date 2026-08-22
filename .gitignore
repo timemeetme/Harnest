@@ -1,4 +1,4 @@
-﻿# ---- Gradle ----
+# ---- Gradle ----
 .gradle/
 build/
 !gradle/wrapper/gradle-wrapper.jar
@@ -112,7 +112,6 @@ tools/harness-transpiler/build2.mjs
 tools/harness-transpiler/patch-check.mjs
 tools/harness-transpiler/smoke-manual.mjs
 tools/harness-transpiler/smoke_base.txt
-tools/harness-transpiler/src/capability-manual.ts
 
 # ---- DevEco hvigor 工具链（自动生成，不入库）----
 hvigor/
