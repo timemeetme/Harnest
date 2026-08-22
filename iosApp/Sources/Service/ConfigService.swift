@@ -58,6 +58,9 @@ final class ConfigService {
     }
 
     private func saveLocked(_ cfg: [String: Any]) {
+        // Swift 字典为值类型：写路径必须回写缓存，否则 load() 仍返回旧快照
+        // （Kotlin JSONObject 为引用类型，原地 put 即同步；Swift 需显式回写）
+        cached = cfg
         guard let data = try? JSONSerialization.data(withJSONObject: cfg, options: [.prettyPrinted, .sortedKeys]) else { return }
         try? data.write(to: Self.file, options: .atomic)
     }
