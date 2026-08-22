@@ -108,7 +108,9 @@ final class HarnessEngine {
             let msg = value?.toString() ?? "unknown js exception"
             self?.listener?.onLog(stream: "stderr", chunk: "[engine] \(msg)")
         }
-        let global = ctx.globalObject
+        guard let global = ctx.globalObject else {
+            throw EngineError.bootFailed("JSContext globalObject unavailable")
+        }
 
         // 1. env globals (before eval — harness.js probes them)
         global.setObject(cwd.path, forKeyedSubscript: "__HARNESS_CWD" as NSString)
@@ -195,8 +197,8 @@ final class HarnessEngine {
 
         let callSettle: @convention(block) (Any?, Any?, Any?) -> Void = { [weak self] a, b, c in
             guard let self = self else { return }
-            let callId = intValue(a) ?? -1
-            let ok = boolValue(b) ?? false
+            let callId = Self.intValue(a) ?? -1
+            let ok = Self.boolValue(b) ?? false
             let json = (c as? String) ?? String(describing: c ?? "null")
             self.settleCall(callId, ok, json)
         }

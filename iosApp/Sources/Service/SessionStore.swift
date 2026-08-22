@@ -1,7 +1,7 @@
 import Foundation
 
 /// Persisted chat message — tool rows carry trajectory fields.
-struct StoredMessage {
+struct StoredMessage: Identifiable, Equatable {
     var id: String
     var role: String
     var content: String
@@ -349,7 +349,7 @@ final class SessionStore {
         list.removeAll { $0.id == id }
         cached = list
         saveAllLocked(list)
-        deleteLogFile(id)
+        deleteLogFile(sessionId: id)
     }
 
     func get(id: String) -> SessionRecord? {

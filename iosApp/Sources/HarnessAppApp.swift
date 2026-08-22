@@ -196,7 +196,8 @@ private struct SideRail: View {
                 .foregroundStyle(Theme.textHint)
                 .padding(.bottom, 16)
         }
-        .frame(width: 96, maxHeight: .infinity)
+        .frame(width: 96)
+        .frame(maxHeight: .infinity)
         .background(Theme.surface)
     }
 
@@ -212,7 +213,7 @@ private struct SideRail: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 10)
         .background(selected ? AnyShapeStyle(Theme.background) : AnyShapeStyle(.clear),
-                    in: UnevenRoundedRectangle(topStartRadius: 14, topEndRadius: 14))
+                    in: TopRoundedShape(radius: 14))
         .contentShape(Rectangle())
         .onTapGesture { onTab(item) }
     }

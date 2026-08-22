@@ -5,6 +5,7 @@ import EventKit
 import CoreLocation
 import AVFoundation
 import Photos
+import PhotosUI
 import UserNotifications
 import Network
 import UniformTypeIdentifiers
@@ -54,7 +55,7 @@ final class PickerLauncher: NSObject, UiLauncher, UIImagePickerControllerDelegat
     }
 
     func pickImage() async -> URL? {
-        await withCheckedContinuation { cont in
+        await withCheckedContinuation { (cont: CheckedContinuation<URL?, Never>) in
             main.async {
                 guard let top = self.topVC() else { cont.resume(returning: nil); return }
                 self.imageCont = cont
@@ -218,7 +219,7 @@ final class DeviceBridge {
         if op == "list" {
             var arr: [[String: Any]] = []
             arr.append(["name": "contacts", "granted": CNContactStore.authorizationStatus(for: .contacts) == .authorized])
-            arr.append(["name": "calendar", "granted": EKEventStore.authorizationStatus(for: .events) == .authorized])
+            arr.append(["name": "calendar", "granted": EKEventStore.authorizationStatus(for: .event) == .authorized])
             let loc = CLLocationManager().authorizationStatus
             arr.append(["name": "location", "granted": loc == .authorizedAlways || loc == .authorizedWhenInUse])
             let mic: Bool

@@ -551,7 +551,7 @@ private enum MdHighlight {
         func append(_ piece: Text) {
             result = result == nil ? piece : result! + piece
         }
-        func appendPlain(_ seg: Substring) {
+        func appendPlain<S: StringProtocol>(_ seg: S) {
             if seg.isEmpty { return }
             if kws.isEmpty {
                 append(Text(String(seg)).foregroundColor(Theme.textPrimary))
@@ -684,13 +684,9 @@ struct MarkdownBody: View {
                     .textSelection(.enabled)
                 Spacer(minLength: 0)
             }
-            return
-        }
-        // k8 接线：段落内图片拆出独立行渲染，其余 span 走文本
-        let images = spans.filter { if case .image = $0 { return true } else { return false } }
-        if images.isEmpty {
-            MdText(spans: spans, size: 15, color: contentColor)
-        } else {
+        } else if spans.contains(where: { if case .image = $0 { return true } else { return false } }) {
+            // k8 接线：段落内图片拆出独立行渲染，其余 span 走文本
+            let images = spans.filter { if case .image = $0 { return true } else { return false } }
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(images.enumerated()), id: \.offset) { _, span in
                     if case .image(let alt, let url) = span {
@@ -702,6 +698,8 @@ struct MarkdownBody: View {
                     MdText(spans: rest, size: 15, color: contentColor)
                 }
             }
+        } else {
+            MdText(spans: spans, size: 15, color: contentColor)
         }
     }
 

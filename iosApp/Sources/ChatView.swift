@@ -278,7 +278,7 @@ struct ChatView: View {
                     }
                     .accessibilityLabel("停止")
                 } else {
-                    Button(action: submit) {
+                    Button(action: { submit() }) {
                         Image(systemName: "paperplane.fill")
                             .font(.system(size: 15, weight: .semibold))
                             .frame(width: 38, height: 38)
@@ -874,6 +874,14 @@ private struct LiveItemRow: View {
             .padding(8)
             .background(Theme.background.opacity(0.45))
             .clipShape(RoundedRectangle(cornerRadius: 8))
+
+        case .answer:
+            Text(item.text)
+                .font(.system(size: 12))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(12)
+                .truncationMode(.tail)
 
         case .tool:
             LiveToolRow(item: item)
