@@ -834,13 +834,28 @@ final class AppStore: ObservableObject {
         do {
             try await engine.ensureStarted()
             engine.refreshProfiles()
-            if let s = currentSession {
+            if var s = currentSession {
+                fallBackUnavailableProvider(&s)
+                store.upsert(s)
+                currentSession = s
                 try? await engine.mountSession(s, seedJson: store.readSeedJson(sessionId: s.id))
             }
             toast("内核已重启")
         } catch {
             toast("重启失败：\(error.localizedDescription)")
         }
+    }
+
+    /// 旧会话的 provider 可能已无可用 key（清空 API/换设备后重开历史会话）——
+    /// 该 provider 未注册内核 adapter，发消息会报 no adapter registered。回落默认可用选择。
+    private func fallBackUnavailableProvider(_ session: inout SessionRecord) {
+        let key = ((config.getConfig(session.provider)["apiKey"] as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard key.isEmpty else { return }
+        let def = config.getDefaultSelection()
+        session.provider = def.0
+        session.model = def.1
+        session.effort = config.getDefaultEffort()
     }
 
     /// Hot-apply provider configs after settings save.

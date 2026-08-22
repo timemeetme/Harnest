@@ -244,6 +244,16 @@ export class AppViewModel {
     this.state.liveItems = [];
     const roundStart = Date.now();
     try {
+      // 旧会话的 provider 可能已无可用 key（清空 API/换设备后重开历史会话）：
+      // 未注册 adapter 的 provider 发消息会报 no adapter registered — 回落默认可用选择
+      const cfgSvc = ConfigService.get();
+      if (cfgSvc.getConfig(record.provider).apiKey.trim().length === 0) {
+        const def = cfgSvc.getDefaultSelection();
+        record.provider = def.provider;
+        record.model = def.model;
+        record.effort = def.effort;
+        this.store.upsert(record);
+      }
       // 1. 引擎启动（幂等）+ 会话挂载（应用会话模型选择；k3b 带日志种子重放）
       await this.engine.ensureStarted(ctx);
       await this.engine.mountSession(record);

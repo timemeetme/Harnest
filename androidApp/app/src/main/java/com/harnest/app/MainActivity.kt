@@ -498,6 +498,15 @@ class MainActivity : ComponentActivity() {
                         mutableListOf(),
                     )
                 }
+                // 旧会话的 provider 可能已无可用 key（清空 API/换设备导入部分配置后重开历史会话）：
+                // 该 provider 未注册内核 adapter，发消息会报 no adapter registered — 回落默认可用选择
+                val cfg = ConfigService.get(this@MainActivity)
+                if (cfg.getConfig(session.provider).optString("apiKey").trim().isEmpty()) {
+                    val def = cfg.getDefaultSelection()
+                    session.provider = def.first
+                    session.model = def.second
+                    session.effort = cfg.getDefaultEffort()
+                }
                 // k3b：挂载时带上 .jsonl 事件日志 — 内核 replay 重建上下文（跨进程重启/
                 // 切换会话回来的记忆延续）；新会话无日志文件 → seedJson=null 全新创建
                 val seedJson = withContext(Dispatchers.IO) {
