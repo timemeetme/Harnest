@@ -27,7 +27,7 @@ concurrency:
 jobs:
   build:
     name: iOS IPA
-    runs-on: macos-latest-xlarge
+    runs-on: macos-latest
 
     env:
       JAVA_VERSION: '17'
