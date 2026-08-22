@@ -153,8 +153,13 @@ jobs:
         if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
         run: ./gradlew :shared:compileKotlinAndroid --no-daemon || true
 
-      - name: Build HarmonyOS HAP
+      # HAP 打包依赖 DevEco 工具链：@ohos/hvigor 未发布到任何公共 npm registry
+      # （项目 devDeps 是本地 file: 路径），OHOS SDK 亦无公开镜像 —— ubuntu runner
+      # 上无法真正出包。此步骤尽力而为：成功则上传 artifact，失败不阻塞门禁。
+      # 硬性质量检查是上方的 QuickJS 兼容门禁（kernel 重建 + API 静态检测）。
+      - name: Build HarmonyOS HAP (best-effort)
         if: steps.preflight.outputs.harmony_dir_present == 'true' && steps.preflight.outputs.hvigorw_present == 'true'
+        continue-on-error: true
         working-directory: harmonyApp
         run: |
           ./hvigorw --mode module \

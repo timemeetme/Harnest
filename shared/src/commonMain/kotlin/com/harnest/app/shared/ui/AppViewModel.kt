@@ -12,6 +12,7 @@ import com.harnest.app.model.LlmConfig
 import com.harnest.app.model.ProviderConfig
 import com.harnest.app.platform.appFilesDir
 import com.harnest.app.platform.defaultKernelHost
+import com.harnest.app.platform.nowMs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -83,11 +84,11 @@ class AppViewModel(
     }
 
     fun newSession(): String {
-        val id = "session-${System.currentTimeMillis()}"
+        val id = "session-${nowMs()}"
         val session = SessionUi(
             id = id,
             title = "新会话",
-            updatedAt = System.currentTimeMillis(),
+            updatedAt = nowMs(),
             messageCount = 0,
         )
         _state.value = _state.value.copy(
@@ -189,7 +190,7 @@ class AppViewModel(
             is DshNotification.SessionEvent -> {
                 _state.value = _state.value.copy(
                     sessions = _state.value.sessions.map { s ->
-                        if (s.id == notif.sessionId) s.copy(updatedAt = System.currentTimeMillis()) else s
+                        if (s.id == notif.sessionId) s.copy(updatedAt = nowMs()) else s
                     },
                 )
             }
@@ -225,10 +226,10 @@ class AppViewModel(
         if (content.isBlank()) return
 
         val userMsg = ChatMessage(
-            id = "msg-${System.currentTimeMillis()}",
+            id = "msg-${nowMs()}",
             role = MessageRole.User,
             content = content,
-            createdAt = System.currentTimeMillis(),
+            createdAt = nowMs(),
         )
         _state.value = _state.value.copy(
             messages = _state.value.messages + userMsg,
@@ -237,7 +238,7 @@ class AppViewModel(
             sessions = _state.value.sessions.map { s ->
                 if (s.id == sessionId) s.copy(
                     messageCount = s.messageCount + 1,
-                    updatedAt = System.currentTimeMillis(),
+                    updatedAt = nowMs(),
                     isRunning = true,
                 ) else s
             },
@@ -260,7 +261,7 @@ class AppViewModel(
         val todos = _state.value.todos
         _state.value = _state.value.copy(
             todos = todos + TodoItemUi(
-                id = "todo-${System.currentTimeMillis()}",
+                id = "todo-${nowMs()}",
                 content = content,
                 done = false,
                 order = todos.size,

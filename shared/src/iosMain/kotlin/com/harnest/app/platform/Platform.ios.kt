@@ -6,7 +6,7 @@ import platform.Foundation.timeIntervalSince1970
 actual fun nowMs(): Long = (NSDate().timeIntervalSince1970 * 1000).toLong()
 
 actual fun appFilesDir(): String {
-    val home = platform.Foundation.NSHomeDirectoryForCurrentUser()
+    val home = platform.Foundation.NSHomeDirectory()
     return "$home/.harnest"
 }
 

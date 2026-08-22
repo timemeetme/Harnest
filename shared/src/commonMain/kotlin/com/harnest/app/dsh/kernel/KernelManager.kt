@@ -3,6 +3,7 @@ package com.harnest.app.dsh.kernel
 import com.harnest.app.dsh.sdk.DshClient
 import com.harnest.app.dsh.transport.DshTransportFactory
 import kotlinx.coroutines.*
+import kotlin.concurrent.Volatile
 
 /**
  * 内核连接模式 — 决定 DshClient 连接到哪里的核心运行时。
@@ -65,8 +66,8 @@ class KernelManager(
             client = c
             c
         }.onFailure { err ->
-            System.err.println("[KernelManager] FAILED: ${err::class.simpleName}: ${err.message}")
-            err.printStackTrace(System.err)
+            println("[KernelManager] FAILED: ${err::class.simpleName}: ${err.message}")
+            err.printStackTrace()
             runCatching { c.disconnect() }
         }
     }
