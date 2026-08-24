@@ -3,7 +3,7 @@
 > 本文件是 TRAE 项目记忆：每次会话自动加载，新会话开工前先读这里，避免重复踩坑。
 > 由 TRAE 生成并按项目进展自动维护：每次会话发生实质变更（新提交/新结论/新陷阱）时由当前会话直接更新。人工修改请同步更新「维护日志」。
 >
-> 最后同步 HEAD: 8c78bd6e89 （2026-08-24，Windows 机）
+> 最后同步 HEAD: 8c78bd6e89 （2026-08-24，Windows 机；Mac 端同日拉取复验：Debug+Release 构建 + XCTest 14/14 全通过）
 
 ## 项目身份
 
@@ -124,8 +124,8 @@ Copy-Item tools\harness-transpiler\output\harness.js harmonyApp\entry\src\main\r
 
 - ✅ **CI 三端 workflow 全绿**（73efc45193 验证）：Build Harmony 2m54s / Build Android 3m43s / Build iOS 11m16s
 - ✅ iOS CI 产物：`.app` bundle（~785KB，可下载后 `codesign -f -s -` ad-hoc 装机）+ XCFramework（~13.8MB）
-- ✅ XCTest **14/14 通过**（Mac，EngineBridgeTests 6 + LocalEngineFlowTests 4 + ProvidersCatalogTests 4，iPhone 17 Pro 模拟器）
-- ✅ iOS Debug + Release 构建通过（Mac 本地 + CI 双验证）
+- ✅ XCTest **14/14 通过**（Mac，EngineBridgeTests 6 + LocalEngineFlowTests 4 + ProvidersCatalogTests 4，iPhone 17 Pro 模拟器；2026-08-24 于 8c78bd6e89 复验——maxTokens 配置链改动后，`setConfig` 新参带默认值向后兼容无需改测试）
+- ✅ iOS Debug + Release 构建通过（Mac 本地 + CI 双验证；2026-08-24 于 8c78bd6e89 Mac 本地复验双配置）
 - ✅ `:shared:iosSimulatorArm64Test` 通过；XCFramework 51MB（ios-arm64 + ios-arm64_x86_64-simulator 双 slice）
 - ✅ Windows `:app:compileDebugKotlin --offline` 通过（8c78bd6e89 时点复验，4s——maxTokens 配置链改动后）
 - ✅ Windows transpiler 打包链路（8c78bd6e89 复验）：build.mjs + patch.mjs + check-quickjs-compat PASS + 三端分发 SHA256 一致（1BEB4F94…）
@@ -164,3 +164,4 @@ Mac 端后续（2026-08-23）：c5d5d82e71（ConfigService 缓存回写值语义
 - 2026-08-23 协议第 1 条升级（基线 c36c6626f2）：开工前先 pull 记忆文件，形成"pull → 干活 → push"闭环，双机 TRAE 会话同等生效
 - 2026-08-24 Windows 端（基线 73efc45193）：修复鸿蒙"0步 8000字思考→模型未返回内容" bug（max-tokens 截断三症状链，见陷阱 14）；CI 三端复绿（iOS 11m16s）；沉淀 transpiler 打包分发命令段；本会话两次踩中陷阱 13（内核 chat 文案、记忆文件 3 处改动均 diff 核对后发现丢失重做）
 - 2026-08-24 Windows 端（8c78bd6e89）：打通 provider 级 maxTokens 用户配置链（内核 buildConnection 用户值跳过 reasoner 硬编码 + 三端 ConfigService 持久化/透传/导入导出 + 三端 provider 编辑页输入框，27 处改动全部串行编辑零丢失——陷阱 13 变体防护生效）；陷阱 14 修订补充决定链；Android 编译 4s 通过、三端分发 SHA256 一致
+- 2026-08-24 Mac 端拉取复验（8c78bd6e89）：pull --rebase 首次遭遇双机记忆文件冲突（双方维护日志并行追加），按协议合并双方条目解决；iOS 侧变更影响评估（harness.js/AppStore/ConfigService/SettingsView 共 4 文件，setConfig 新参带默认值向后兼容，project.yml 未变免 xcodegen）；本地复验 Debug+Release 构建 + XCTest 14/14 全通过，maxTokens 功能在 Mac 本地首次编译验证成功
