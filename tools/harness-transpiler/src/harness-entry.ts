@@ -110,10 +110,10 @@ export interface TurnUsage {
 /** 回合执行细节（消息流内联工具气泡 + 详情页轨迹的数据源） */
 export interface TurnDetails {
   toolCalls: ToolCallEntry[]
-  todos: TodoSnapshotItem[] | null
+  todos?: TodoSnapshotItem[]
   subagents: SubagentEntry[]
   planActive: boolean
-  usage: TurnUsage | null
+  usage?: TurnUsage
 }
 
 export interface ChatOutcome {
@@ -170,9 +170,11 @@ function summarizeEvents(events: SessionEvent[], firstSeq: number): { text: stri
 function extractDetails(events: SessionEvent[], firstSeq: number): TurnDetails {
   const toolCalls: ToolCallEntry[] = []
   const byId = new Map<string, ToolCallEntry>()
-  let todos: TodoSnapshotItem[] | null = null
+  // undefined（而非 null）：JSON.stringify 自动省略 undefined 字段，
+  // 纯对话回合不会输出 "todos":null（宿主端 NSNull 曾致 iOS 崩溃，见 encodeString 守卫）
+  let todos: TodoSnapshotItem[] | undefined = undefined
   let planActive = false
-  let usage: TurnUsage | null = null
+  let usage: TurnUsage | undefined = undefined
   const subagents: SubagentEntry[] = []
   const wfPending = new Map<string, SubagentEntry>()
 
@@ -667,7 +669,8 @@ export class HarnessEngine {
             }
             this.thinkAccText += chunk.text
             const now = Date.now()
-            if (this.thinkAccText.length - this.thinkEmitLen >= 16 || now - this.thinkEmitAt >= 60) {
+            // 64 字 / 200ms：事件携带累积全文，高频小步长会让宿主端（万字思考）做 O(n) 重绘 — 收紧步长
+            if (this.thinkAccText.length - this.thinkEmitLen >= 64 || now - this.thinkEmitAt >= 200) {
               this.thinkEmitAt = now
               this.thinkEmitLen = this.thinkAccText.length
               this.emit('round', { kind: 'thinking', seq: event.seq, text: this.thinkAccText })

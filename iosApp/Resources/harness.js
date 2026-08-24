@@ -32447,9 +32447,9 @@ ${value}`, dataLines++;
   function extractDetails(events, firstSeq) {
     const toolCalls = [];
     const byId = /* @__PURE__ */ new Map();
-    let todos = null;
+    let todos = void 0;
     let planActive = false;
-    let usage = null;
+    let usage = void 0;
     const subagents = [];
     const wfPending = /* @__PURE__ */ new Map();
     for (const event of events) {
@@ -32843,7 +32843,7 @@ ${value}`, dataLines++;
               }
               this.thinkAccText += chunk.text;
               const now = Date.now();
-              if (this.thinkAccText.length - this.thinkEmitLen >= 16 || now - this.thinkEmitAt >= 60) {
+              if (this.thinkAccText.length - this.thinkEmitLen >= 64 || now - this.thinkEmitAt >= 200) {
                 this.thinkEmitAt = now;
                 this.thinkEmitLen = this.thinkAccText.length;
                 this.emit("round", { kind: "thinking", seq: event.seq, text: this.thinkAccText });

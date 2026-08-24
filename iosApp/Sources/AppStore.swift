@@ -83,6 +83,9 @@ final class AppStore: ObservableObject {
     @Published var planActive = false
     /// 回合实时轨迹（思考段/工具行/转向/子代理/待办），结束后序列化进 traceJson
     @Published var liveItems: [LiveItem] = []
+    /// 思考文本节流：避免高频 thinking 事件（60ms 一次、万字文本）卡死 UI
+    private var thinkThrottleAt: TimeInterval = 0
+    private var thinkPending: String?
 
     /// k6 停止标志（doSend 收尾时检查 — 清空队列 vs 续发）
     private var stopped = false
@@ -336,6 +339,7 @@ final class AppStore: ObservableObject {
 
     /// 回合收尾：停止 → 清空排队；自然结束 → 自动续发队首（k4）。
     private func finishRound() {
+        flushPendingThink()
         busy = false
         busyHint = ""
         if stopped {
@@ -346,6 +350,23 @@ final class AppStore: ObservableObject {
             let next = queuedMessages.removeFirst()
             Task { await doSend(next) }
         }
+    }
+
+    /// 节流丢帧补偿：把 200ms 窗口内暂存的思考文本落进实时面板（回合收尾保证最终完整）。
+    private func flushPendingThink() {
+        guard let text = thinkPending else { return }
+        thinkPending = nil
+        var items = liveItems
+        if var last = items.last, last.kind == .think,
+           text.count >= last.text.count, text.hasPrefix(last.text) {
+            last.text = text
+            items[items.count - 1] = last
+        } else {
+            var item = LiveItem(kind: .think)
+            item.text = text
+            items.append(item)
+        }
+        liveItems = items
     }
 
     private func appendOutcome(_ session: inout SessionRecord, _ outcome: [String: Any], roundStart: Date) {
@@ -687,6 +708,15 @@ final class AppStore: ObservableObject {
         switch kind {
         case "thinking":
             let text = o["text"] as? String ?? ""
+            let now = Date().timeIntervalSince1970
+            // 节流：150ms 内的 thinking 事件只暂存不刷新 UI（窗口须严格小于内核 200ms
+            // 心跳，避免同频相位锁死导致整轮不刷新）；万字文本每 60ms 全量重发会卡死主线程
+            if now - thinkThrottleAt < 0.15 {
+                thinkPending = text
+                return
+            }
+            thinkThrottleAt = now
+            thinkPending = nil
             if var last = items.last, last.kind == .think,
                text.count >= last.text.count, text.hasPrefix(last.text) {
                 last.text = text
@@ -761,6 +791,7 @@ final class AppStore: ObservableObject {
 
     /// 序列化实时活动列表为轨迹 JSON（与 Android/HarmonyOS parseTrace 同格式）。
     private func traceJson() -> String {
+        flushPendingThink()
         guard !liveItems.isEmpty else { return "" }
         var arr: [[String: Any]] = []
         for it in liveItems {
@@ -901,7 +932,12 @@ final class AppStore: ObservableObject {
     private static func encodeString(_ any: Any?) -> String? {
         guard let any else { return nil }
         if let s = any as? String { return s }
-        guard let data = try? JSONSerialization.data(withJSONObject: any, options: [.sortedKeys]) else { return nil }
+        // NSNull / NSNumber 等标量顶层会让 dataWithJSONObject 抛 NSInvalidArgumentException
+        // （try? 接不住 ObjC 异常，直接崩进程）— isValidJSONObject 前置检查不抛异常。
+        // 触发源：内核 details.todos / details.usage 在纯对话回合为 JSON null。
+        if any is NSNull { return nil }
+        guard JSONSerialization.isValidJSONObject(any),
+              let data = try? JSONSerialization.data(withJSONObject: any, options: [.sortedKeys]) else { return nil }
         return String(data: data, encoding: .utf8)
     }
 }

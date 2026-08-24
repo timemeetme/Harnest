@@ -310,6 +310,12 @@ final class LocalEngine {
         return String(data: data, encoding: .utf8) ?? "{}"
     }
 
+    /// 日志预览截断：高频事件（thinking 累积全文）只保留头部 + 总长标记。
+    static func logPreview(_ s: String) -> String {
+        guard s.count > 240 else { return s }
+        return String(s.prefix(240)) + "…<\(s.count) chars>"
+    }
+
     private static func stringList(_ any: Any?) -> [String] {
         guard let arr = any as? [Any] else { return [] }
         return arr.compactMap { $0 as? String }
@@ -323,13 +329,16 @@ final class LocalEngine {
 extension LocalEngine: HostListener {
 
     func onLog(stream: String, chunk: String) {
-        NSLog("Harness/%@ %@", stream, chunk)
-        onLogLine?("[\(stream)] \(chunk)")
+        let p = Self.logPreview(chunk)
+        NSLog("Harness/%@ %@", stream, p)
+        onLogLine?("[\(stream)] \(p)")
     }
 
     func onEvent(eventJson: String) {
-        NSLog("Harness/event %@", eventJson)
-        onLogLine?("[event] \(eventJson)")
+        // 万字 thinking 事件 60ms 一条：NSLog/日志镜像全文刷屏会拖垮引擎线程 — 截断预览
+        let p = Self.logPreview(eventJson)
+        NSLog("Harness/event %@", p)
+        onLogLine?("[event] \(p)")
         guard let data = eventJson.data(using: .utf8),
               let o = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
         let type = o["type"] as? String ?? ""

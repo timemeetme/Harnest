@@ -876,7 +876,9 @@ private struct LiveItemRow: View {
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(Theme.textHint)
                 }
-                Text(item.text)
+                Text(item.text.count > 4000
+                     ? "…（已省略 \(item.text.count - 4000) 字，仅展示尾部）\n\(item.text.suffix(4000))"
+                     : item.text)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(nil)
