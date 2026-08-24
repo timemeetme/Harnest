@@ -45,6 +45,16 @@ export class AppViewModel {
   private store: SessionStore = SessionStore.get();
   /** k6 停止标志（本轮发送 finally 中检查 — 决定清空队列还是续发） */
   private stopped: boolean = false;
+  // 思考/回复节流（150ms，窗口须严格小于内核 200ms 心跳防相位锁死）：万字累积全量高频
+  // 覆盖会触发 liveItems 整组替换重渲染卡 UI，暂存丢帧由回合收尾 flushPendingLive 补偿
+  private thinkThrottleAt: number = 0;
+  private thinkPendingText: string | null = null;
+  private thinkPendingTurn: number = 0;
+  private thinkPendingStep: number = 0;
+  private answerThrottleAt: number = 0;
+  private answerPendingText: string | null = null;
+  private answerPendingTurn: number = 0;
+  private answerPendingStep: number = 0;
 
   /** Index 启动时调用 */
   init(context: common.Context): void {
@@ -317,6 +327,7 @@ export class AppViewModel {
       // 会话状态仍持久化（含用户消息）
       this.persistSession(record, text);
     } finally {
+      this.flushPendingLive();
       this.state.isSending = false;
       this.state.busyHint = '';
       if (this.stopped) {
@@ -663,10 +674,22 @@ export class AppViewModel {
     const items = this.state.liveItems.slice();
     if (evt.kind === 'thinking') {
       // 内核 emit 段内累积全量（64 字/200ms 节流）：同 (turn,step) 幂等覆盖，跨键开新段。
-      // 倒序查找而非只看尾元素——assistant/message 兜底发来时段后可能已有工具行
+      // 倒序查找而非只看尾元素——assistant/message 兜底发来时段后可能已有工具行；
+      // 宿主 150ms 节流（窗口严格小于内核心跳，防相位锁死），丢帧由 flushPendingLive 补偿
       const text = evt.text ?? '';
       const turn = evt.turn ?? 0;
       const step = evt.step ?? 0;
+      if (text.length === 0) {
+        return;
+      }
+      const now = Date.now();
+      if (now - this.thinkThrottleAt < 150) {
+        this.thinkPendingText = text;
+        this.thinkPendingTurn = turn;
+        this.thinkPendingStep = step;
+        return;
+      }
+      this.thinkThrottleAt = now;
       let idx = -1;
       for (let i = items.length - 1; i >= 0; i--) {
         if (items[i].kind === 'think' && items[i].turn === turn && items[i].step === step) {
@@ -690,11 +713,22 @@ export class AppViewModel {
         items.push(item);
       }
     } else if (evt.kind === 'answer') {
-      // 流式答案正文：与思考同构按 (turn,step) 分段累积覆盖（Answer 不入 trace，
-      // 最终 assistant 正文即完整形态）
+      // 流式答案正文：与思考同构按 (turn,step) 分段累积覆盖 + 150ms 节流（Answer 不入
+      // trace，最终 assistant 正文即完整形态）
       const text = evt.text ?? '';
       const turn = evt.turn ?? 0;
       const step = evt.step ?? 0;
+      if (text.length === 0) {
+        return;
+      }
+      const now = Date.now();
+      if (now - this.answerThrottleAt < 150) {
+        this.answerPendingText = text;
+        this.answerPendingTurn = turn;
+        this.answerPendingStep = step;
+        return;
+      }
+      this.answerThrottleAt = now;
       let idx = -1;
       for (let i = items.length - 1; i >= 0; i--) {
         if (items[i].kind === 'answer' && items[i].turn === turn && items[i].step === step) {
@@ -788,6 +822,49 @@ export class AppViewModel {
     this.state.liveItems = items;
   }
 
+  /** 节流丢帧补偿：把 150ms 窗口内暂存的思考/回复文本落进实时面板（回合收尾保证最终完整）。 */
+  private flushPendingLive(): void {
+    const tText = this.thinkPendingText;
+    if (tText !== null) {
+      this.thinkPendingText = null;
+      this.upsertLiveItem('think', tText, this.thinkPendingTurn, this.thinkPendingStep, 0);
+    }
+    const aText = this.answerPendingText;
+    if (aText !== null) {
+      this.answerPendingText = null;
+      this.upsertLiveItem('answer', aText, this.answerPendingTurn, this.answerPendingStep, 0);
+    }
+  }
+
+  /** 按 (turn,step) 幂等 upsert 思考/回复段（内核事件携带段内累积全量，同键且更长时覆盖）。 */
+  private upsertLiveItem(kind: string, text: string, turn: number, step: number, seq: number): void {
+    const items = this.state.liveItems.slice();
+    let idx = -1;
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i].kind === kind && items[i].turn === turn && items[i].step === step) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx >= 0) {
+      if (text.length >= items[idx].text.length) {
+        const updated = this.cloneItem(items[idx]);
+        updated.text = text;
+        items[idx] = updated;
+        this.state.liveItems = items;
+      }
+    } else {
+      const item = new LiveItem();
+      item.kind = kind;
+      item.seq = seq;
+      item.turn = turn;
+      item.step = step;
+      item.text = text;
+      items.push(item);
+      this.state.liveItems = items;
+    }
+  }
+
   private cloneItem(src: LiveItem): LiveItem {
     const item = new LiveItem();
     item.kind = src.kind;
@@ -804,6 +881,7 @@ export class AppViewModel {
 
   /** 序列化实时活动列表为轨迹 JSON（与 Android 端 parseTrace 同格式）。 */
   private traceJson(): string {
+    this.flushPendingLive();
     const items = this.state.liveItems;
     if (items.length === 0) {
       return '';

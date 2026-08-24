@@ -91,6 +91,11 @@ final class AppStore: ObservableObject {
     private var thinkPending: String?
     private var thinkPendingTurn = 0
     private var thinkPendingStep = 0
+    /// 回复预览同构节流（150ms）：万字 answer 累积全量每 200ms upsert 重建全文 Text 同样卡 UI
+    private var answerThrottleAt: TimeInterval = 0
+    private var answerPending: String?
+    private var answerPendingTurn = 0
+    private var answerPendingStep = 0
 
     /// k6 停止标志（doSend 收尾时检查 — 清空队列 vs 续发）
     private var stopped = false
@@ -357,12 +362,27 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// 节流丢帧补偿：把 200ms 窗口内暂存的思考文本落进实时面板（回合收尾保证最终完整）。
+    /// 节流丢帧补偿：把 150ms 窗口内暂存的思考/回复文本落进实时面板（回合收尾保证最终完整）。
     private func flushPendingThink() {
-        guard let text = thinkPending else { return }
-        thinkPending = nil
+        guard thinkPending != nil || answerPending != nil else { return }
         var items = liveItems
-        upsertThink(&items, text: text, turn: thinkPendingTurn, step: thinkPendingStep, seq: 0)
+        if let text = thinkPending {
+            thinkPending = nil
+            upsertThink(&items, text: text, turn: thinkPendingTurn, step: thinkPendingStep, seq: 0)
+        }
+        if let text = answerPending {
+            answerPending = nil
+            if let i = items.lastIndex(where: { $0.kind == .answer && $0.turn == answerPendingTurn && $0.step == answerPendingStep }),
+               text.count >= items[i].text.count {
+                items[i].text = text
+            } else {
+                var item = LiveItem(kind: .answer)
+                item.turn = answerPendingTurn
+                item.step = answerPendingStep
+                item.text = text
+                items.append(item)
+            }
+        }
         liveItems = items
     }
 
@@ -736,10 +756,19 @@ final class AppStore: ObservableObject {
             upsertThink(&items, text: text, turn: turn, step: step,
                         seq: (o["seq"] as? NSNumber)?.intValue ?? 0)
         case "answer":
-            // 回复预览：与思考同构按 (turn,step) 分段 upsert（内核段内累积全量）
+            // 回复预览：与思考同构按 (turn,step) 分段 upsert（内核段内累积全量）；
+            // 同构 150ms 节流——万字回复全量 upsert 重建 AttributedString 与思考卡顿同构
             let text = o["text"] as? String ?? ""
             let turn = (o["turn"] as? NSNumber)?.intValue ?? 0
             let step = (o["step"] as? NSNumber)?.intValue ?? 0
+            let now = Date().timeIntervalSince1970
+            if now - answerThrottleAt < 0.15 {
+                answerPending = text
+                answerPendingTurn = turn
+                answerPendingStep = step
+                return
+            }
+            answerThrottleAt = now
             if let i = items.lastIndex(where: { $0.kind == .answer && $0.turn == turn && $0.step == step }),
                text.count >= items[i].text.count {
                 items[i].text = text

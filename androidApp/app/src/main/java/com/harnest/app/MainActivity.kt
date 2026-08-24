@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -127,6 +128,16 @@ class MainActivity : ComponentActivity() {
     private val bgJobs = mutableStateOf<List<BgJobView>>(emptyList()) // k7e：后台任务可见集（jobs 事件覆盖式镜像）
     private var roundThinkChars = 0
     private var roundAnswerChars = 0
+    // 思考/回复节流（150ms，窗口须严格小于内核 200ms 心跳防相位锁死）：万字累积全量高频
+    // upsert 会触发快照列表整体重组卡 UI，暂存丢帧由回合收尾 flushPendingLive 补偿
+    private var thinkThrottleAt = 0L
+    private var thinkPendingText: String? = null
+    private var thinkPendingTurn = 0
+    private var thinkPendingStep = 0
+    private var answerThrottleAt = 0L
+    private var answerPendingText: String? = null
+    private var answerPendingTurn = 0
+    private var answerPendingStep = 0
     private var sendJob: Job? = null
 
     // ── ActivityResult bridges (register before onCreate body) ──
@@ -598,6 +609,7 @@ class MainActivity : ComponentActivity() {
                 SessionStore.get(this@MainActivity).upsert(session)
                 refreshSessions()
             } finally {
+                flushPendingLive()
                 sendJob = null
                 busy.value = false
                 busyHint.value = ""
@@ -910,24 +922,30 @@ class MainActivity : ComponentActivity() {
                 val turn = o.optInt("turn", 0)
                 val step = o.optInt("step", 0)
                 if (text.isNotEmpty()) {
-                    val idx = liveItems.indexOfLast { it is LiveItem.Think && it.turn == turn && it.step == step }
-                    if (idx >= 0) {
-                        val old = liveItems[idx] as LiveItem.Think
-                        if (text.length >= old.text.length) liveItems[idx] = old.copy(text = text)
-                    } else {
-                        liveItems.add(LiveItem.Think(o.optInt("seq"), step, text, turn))
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - thinkThrottleAt < 150) {
+                        thinkPendingText = text; thinkPendingTurn = turn; thinkPendingStep = step
+                        return
                     }
+                    thinkThrottleAt = now
+                    upsertThink(text, turn, step, o.optInt("seq", 0))
                     roundThinkChars = liveItems.filterIsInstance<LiveItem.Think>().sumOf { it.text.length }
                     busyHint.value = "思考中 · ${roundThinkChars} 字"
                 }
             }
             "answer" -> {
-                // 回复预览：与 thinking 同构按 (turn,step) 分段累积覆盖（Answer 不入 trace，
-                // 最终 assistant 正文即完整形态）
+                // 回复预览：与 thinking 同构按 (turn,step) 分段累积覆盖 + 150ms 节流
+                // （Answer 不入 trace，最终 assistant 正文即完整形态）
                 val text = o.optString("text", "")
                 val turn = o.optInt("turn", 0)
                 val step = o.optInt("step", 0)
                 if (text.isNotEmpty()) {
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - answerThrottleAt < 150) {
+                        answerPendingText = text; answerPendingTurn = turn; answerPendingStep = step
+                        return
+                    }
+                    answerThrottleAt = now
                     val idx = liveItems.indexOfLast { it is LiveItem.Answer && it.turn == turn && it.step == step }
                     if (idx >= 0) {
                         val old = liveItems[idx] as LiveItem.Answer
@@ -1000,9 +1018,43 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** 按 (turn,step) 幂等 upsert 思考段（内核事件携带段内累积全量，同键且更长时覆盖）。 */
+    private fun upsertThink(text: String, turn: Int, step: Int, seq: Int) {
+        val idx = liveItems.indexOfLast { it is LiveItem.Think && it.turn == turn && it.step == step }
+        if (idx >= 0) {
+            val old = liveItems[idx] as LiveItem.Think
+            if (text.length >= old.text.length) liveItems[idx] = old.copy(text = text)
+        } else {
+            liveItems.add(LiveItem.Think(seq, step, text, turn))
+        }
+    }
+
+    /** 节流丢帧补偿：把 150ms 窗口内暂存的思考/回复文本落进实时面板（回合收尾保证最终完整）。 */
+    private fun flushPendingLive() {
+        val tText = thinkPendingText
+        if (tText != null) {
+            thinkPendingText = null
+            upsertThink(tText, thinkPendingTurn, thinkPendingStep, 0)
+        }
+        val aText = answerPendingText
+        if (aText != null) {
+            answerPendingText = null
+            val idx = liveItems.indexOfLast {
+                it is LiveItem.Answer && it.turn == answerPendingTurn && it.step == answerPendingStep
+            }
+            if (idx >= 0) {
+                val old = liveItems[idx] as LiveItem.Answer
+                if (aText.length >= old.text.length) liveItems[idx] = old.copy(text = aText)
+            } else {
+                liveItems.add(LiveItem.Answer(aText, answerPendingTurn, answerPendingStep))
+            }
+        }
+    }
+
     /** 序列化实时活动列表为轨迹 JSON，随 assistant 消息持久化（历史中可回看）。
      *  Answer 流式预览不入轨迹——最终 assistant 消息正文即其完整形态。 */
     private fun traceJson(): String? {
+        flushPendingLive()
         if (liveItems.isEmpty()) return null
         val arr = JSONArray()
         for (item in liveItems) {
