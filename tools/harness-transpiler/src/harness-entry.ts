@@ -404,8 +404,10 @@ export class HarnessEngine {
         ...(m.name !== undefined ? { name: m.name } : {}),
         ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
         ...(m.maxTokens !== undefined
-          ? { maxTokens: m.maxTokens }
-          : name === 'deepseek' && m.id.includes('reasoner') ? { maxTokens: 65536 } : {}),
+        ? { maxTokens: m.maxTokens }
+        : profile.maxTokens === undefined && name === 'deepseek' && m.id.includes('reasoner')
+          ? { maxTokens: 65536 }
+          : {}),
       })),
       streamIdleTimeoutMs: 300_000,
       retryPolicy: resolveRetryPolicy(undefined, `harness: ${name}`),

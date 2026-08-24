@@ -14,6 +14,8 @@ export interface ProviderConfig {
   models: string[];
   defaultModel: string;
   enabled: boolean;
+  /** 每请求最大输出 tokens（含深度思考）；未配置走内核默认（reasoner 65536 / 其他 8192） */
+  maxTokens?: number;
 }
 
 /** 配置文件结构（含「记住最后一次模型选择」） */
@@ -214,12 +216,16 @@ export class ConfigService {
         const input: ModelInput = { id: m };
         modelInputs.push(input);
       }
-      profiles.push({
+      const profile: ProviderProfileInput = {
         provider: item.provider,
         baseUrl: item.baseUrl,
         apiKey: item.apiKey,
         models: modelInputs
-      });
+      };
+      if (item.maxTokens !== undefined && item.maxTokens > 0) {
+        profile.maxTokens = item.maxTokens;
+      }
+      profiles.push(profile);
     }
     const cfg: EngineConfig = {
       cwd: cwd,
@@ -244,6 +250,9 @@ export class ConfigService {
         obj['baseUrl'] = item.baseUrl;
         obj['models'] = item.models;
         obj['defaultModel'] = item.defaultModel;
+        if (item.maxTokens !== undefined && item.maxTokens > 0) {
+          obj['maxTokens'] = item.maxTokens;
+        }
         configs.push(obj);
       }
     }
@@ -345,6 +354,10 @@ export class ConfigService {
         defaultModel: defaultModel,
         enabled: true
       };
+      const maxTokensVal = obj['maxTokens'];
+      if (typeof maxTokensVal === 'number' && maxTokensVal > 0) {
+        cfg.maxTokens = maxTokensVal;
+      }
       const existing = c.configs[providerStr];
       if (existing !== undefined && existing.apiKey === cfg.apiKey && existing.defaultModel === cfg.defaultModel) {
         continue;

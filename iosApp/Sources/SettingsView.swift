@@ -269,6 +269,7 @@ struct ProviderEditView: View {
     @State private var baseUrl = ""
     @State private var models: [String] = []
     @State private var defaultModel = ""
+    @State private var maxTokens = ""
     @State private var showKey = false
     @State private var newModel = ""
     @State private var addModelField = false
@@ -284,6 +285,7 @@ struct ProviderEditView: View {
             VStack(alignment: .leading, spacing: 14) {
                 apiKeySection
                 baseUrlSection
+                maxTokensSection
                 modelsSection
                 saveSection
             }
@@ -304,6 +306,11 @@ struct ProviderEditView: View {
         defaultModel = cfg["defaultModel"] as? String ?? (models.first ?? "")
         if defaultModel.isEmpty && !models.isEmpty {
             defaultModel = models[0]
+        }
+        if let mt = cfg["maxTokens"] as? Int, mt > 0 {
+            maxTokens = String(mt)
+        } else {
+            maxTokens = ""
         }
     }
 
@@ -377,6 +384,24 @@ struct ProviderEditView: View {
     }
 
     // ── models ───────────────────────────────────────────────
+
+    private var maxTokensSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("最大输出 Tokens（留空用默认）")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.textHint)
+            TextField("如 8192", text: $maxTokens)
+                .font(.system(size: 13))
+                .foregroundStyle(Theme.textPrimary)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
+                .keyboardType(.numberPad)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(Theme.surface)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+    }
 
     private var modelsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -510,12 +535,14 @@ struct ProviderEditView: View {
     }
 
     private func save() {
+        let mt = Int(maxTokens.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
         ConfigService.get().setConfig(
             provider: provider,
             apiKey: apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
             baseUrl: baseUrl.trimmingCharacters(in: .whitespacesAndNewlines),
             models: models,
-            defaultModel: defaultModel
+            defaultModel: defaultModel,
+            maxTokens: mt > 0 ? mt : nil
         )
         app.onConfigChanged()
         app.toast("已保存 \(meta?.label ?? provider) 配置")

@@ -32650,7 +32650,7 @@ ${value}`, dataLines++;
           id: m.id,
           ...m.name !== void 0 ? { name: m.name } : {},
           ...m.contextWindow !== void 0 ? { contextWindow: m.contextWindow } : {},
-          ...m.maxTokens !== void 0 ? { maxTokens: m.maxTokens } : name4 === "deepseek" && m.id.includes("reasoner") ? { maxTokens: 65536 } : {}
+          ...m.maxTokens !== void 0 ? { maxTokens: m.maxTokens } : profile.maxTokens === void 0 && name4 === "deepseek" && m.id.includes("reasoner") ? { maxTokens: 65536 } : {}
         })),
         streamIdleTimeoutMs: 3e5,
         retryPolicy: resolveRetryPolicy(void 0, `harness: ${name4}`)

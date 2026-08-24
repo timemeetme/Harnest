@@ -93,7 +93,14 @@ class ConfigService private constructor(private val context: Context) {
 
     /** Save one provider entry; non-empty apiKey == enabled. */
     @Synchronized
-    fun setConfig(provider: String, apiKey: String, baseUrl: String, models: List<String>, defaultModel: String) {
+    fun setConfig(
+        provider: String,
+        apiKey: String,
+        baseUrl: String,
+        models: List<String>,
+        defaultModel: String,
+        maxTokens: Int? = null,
+    ) {
         val c = load()
         val trimmedKey = apiKey.trim()
         if (baseUrl.isBlank() && provider != Providers.CUSTOM) {
@@ -106,6 +113,9 @@ class ConfigService private constructor(private val context: Context) {
             .put("models", JSONArray(models.ifEmpty { listOf(defaultModel) }))
             .put("defaultModel", defaultModel.ifBlank { models.firstOrNull() ?: "" })
             .put("enabled", trimmedKey.isNotEmpty())
+        if (maxTokens != null && maxTokens > 0) {
+            entry.put("maxTokens", maxTokens)
+        }
         c.optJSONObject("configs")?.put(provider, entry) ?: c.put("configs", JSONObject().put(provider, entry))
         saveLocked(c)
     }
@@ -169,11 +179,14 @@ class ConfigService private constructor(private val context: Context) {
                 .ifEmpty { listOf(item.optString("defaultModel")) }
             val modelInputs = JSONArray()
             for (m in models) modelInputs.put(JSONObject().put("id", m))
-            profiles.put(JSONObject()
+            val profile = JSONObject()
                 .put("provider", item.optString("provider"))
                 .put("baseUrl", item.optString("baseUrl"))
                 .put("apiKey", item.optString("apiKey"))
-                .put("models", modelInputs))
+                .put("models", modelInputs)
+            val mt = item.optInt("maxTokens", 0)
+            if (mt > 0) profile.put("maxTokens", mt)
+            profiles.put(profile)
         }
         return JSONObject()
             .put("cwd", cwd)
@@ -220,6 +233,8 @@ class ConfigService private constructor(private val context: Context) {
                     .put("models", JSONArray(models))
                     .put("defaultModel", defaultModel)
                     .put("enabled", true)
+                val mt = obj.optInt("maxTokens", 0)
+                if (mt > 0) entry.put("maxTokens", mt)
                 val existing = configs.optJSONObject(provider)
                 if (existing != null && existing.optString("apiKey") == apiKey
                     && existing.optString("defaultModel") == defaultModel) continue
@@ -243,15 +258,16 @@ class ConfigService private constructor(private val context: Context) {
             val item = c.optJSONObject("configs")?.optJSONObject(p) ?: continue
             val apiKey = item.optString("apiKey").trim()
             if (apiKey.isEmpty()) continue
-            configs.put(
-                JSONObject()
-                    .put("provider", item.optString("provider", p))
-                    .put("apiKey", apiKey)
-                    .put("model", item.optString("defaultModel"))
-                    .put("baseUrl", item.optString("baseUrl"))
-                    .put("models", item.optJSONArray("models") ?: JSONArray())
-                    .put("defaultModel", item.optString("defaultModel"))
-            )
+            val exported = JSONObject()
+                .put("provider", item.optString("provider", p))
+                .put("apiKey", apiKey)
+                .put("model", item.optString("defaultModel"))
+                .put("baseUrl", item.optString("baseUrl"))
+                .put("models", item.optJSONArray("models") ?: JSONArray())
+                .put("defaultModel", item.optString("defaultModel"))
+            val mt = item.optInt("maxTokens", 0)
+            if (mt > 0) exported.put("maxTokens", mt)
+            configs.put(exported)
         }
         return JSONObject()
             .put("version", 1)

@@ -62,6 +62,7 @@ fun SettingsView(
     var editApiKey by remember { mutableStateOf("") }
     var editBaseUrl by remember { mutableStateOf("") }
     var editModels by remember { mutableStateOf("") }
+    var editMaxTokens by remember { mutableStateOf("") }
     var showImport by remember { mutableStateOf(false) }
     var importText by remember { mutableStateOf("") }
     var importResult by remember { mutableStateOf("") }
@@ -132,9 +133,11 @@ fun SettingsView(
             apiKey = editApiKey,
             baseUrl = editBaseUrl,
             models = editModels,
+            maxTokens = editMaxTokens,
             onApiKey = { editApiKey = it },
             onBaseUrl = { editBaseUrl = it },
             onModels = { editModels = it },
+            onMaxTokens = { editMaxTokens = it },
             onBack = { editingProvider = null },
             onSave = {
                 val apiKey = editApiKey.trim()
@@ -150,7 +153,11 @@ fun SettingsView(
                 }
                 var baseUrl = editBaseUrl.trim()
                 if (baseUrl.isEmpty()) baseUrl = Providers.metaOf(p)?.baseUrl ?: ""
-                ConfigService.get(context).setConfig(p, apiKey, baseUrl, models, models.first())
+                val mt = editMaxTokens.trim().toIntOrNull() ?: 0
+                ConfigService.get(context).setConfig(
+                    p, apiKey, baseUrl, models, models.first(),
+                    if (mt > 0) mt else null,
+                )
                 toast("已保存 ${Providers.metaOf(p)?.label ?: p}")
                 configRev++
                 onConfigSaved()
@@ -228,6 +235,8 @@ fun SettingsView(
                             editModels = (0 until cfg.optJSONArray("models")?.length().let { it ?: 0 })
                                 .mapNotNull { i -> cfg.optJSONArray("models")?.optString(i) }
                                 .joinToString("\n")
+                            val mt = cfg.optInt("maxTokens", 0)
+                            editMaxTokens = if (mt > 0) mt.toString() else ""
                             editingProvider = prov
                         }
                         .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -381,9 +390,11 @@ private fun EditorPage(
     apiKey: String,
     baseUrl: String,
     models: String,
+    maxTokens: String,
     onApiKey: (String) -> Unit,
     onBaseUrl: (String) -> Unit,
     onModels: (String) -> Unit,
+    onMaxTokens: (String) -> Unit,
     onBack: () -> Unit,
     onSave: () -> Unit,
 ) {
@@ -449,6 +460,15 @@ private fun EditorPage(
                 hint = "例如\ndeepseek-chat\ndeepseek-reasoner",
                 minLines = 4,
                 maxLines = 8,
+            )
+            Spacer(Modifier.height(12.dp))
+            FieldLabel("最大输出 Tokens（留空用默认）")
+            FieldBox(
+                value = maxTokens,
+                onValue = onMaxTokens,
+                hint = "如 8192",
+                minLines = 1,
+                maxLines = 1,
             )
             Spacer(Modifier.height(20.dp))
             Box(

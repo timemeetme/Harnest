@@ -30,6 +30,7 @@ export struct SettingsView {
   @State editApiKey: string = '';
   @State editBaseUrl: string = '';
   @State editModels: string = '';
+  @State editMaxTokens: string = '';
   @State showImport: boolean = false;
   @State importText: string = '';
   @State importResult: string = '';
@@ -285,6 +286,21 @@ export struct SettingsView {
         }
         .width('100%').alignItems(HorizontalAlign.Start)
 
+        Column({ space: 6 }) {
+          Text('最大输出 Tokens（留空用默认）').fontSize('12fp').fontColor(this.theme.textSecondary)
+          TextInput({ text: this.editMaxTokens, placeholder: '如 8192' })
+            .fontSize('14fp').fontColor(this.theme.textPrimary)
+            .placeholderColor(this.theme.textHint)
+            .backgroundColor(this.theme.surface)
+            .borderRadius(10)
+            .height(42)
+            .type(InputType.Number)
+            .onChange((v: string) => {
+              this.editMaxTokens = v;
+            })
+        }
+        .width('100%').alignItems(HorizontalAlign.Start)
+
         Button('保存')
           .fontSize('15fp')
           .fontColor(this.theme.primaryOn)
@@ -372,6 +388,7 @@ export struct SettingsView {
     this.editApiKey = cfg.apiKey;
     this.editBaseUrl = cfg.baseUrl;
     this.editModels = cfg.models.join('\n');
+    this.editMaxTokens = cfg.maxTokens !== undefined ? String(cfg.maxTokens) : '';
   }
 
   private saveEditor(): void {
@@ -397,6 +414,10 @@ export struct SettingsView {
       defaultModel: defaultModel,
       enabled: this.editApiKey.trim().length > 0
     };
+    const mt = parseInt(this.editMaxTokens.trim(), 10);
+    if (!isNaN(mt) && mt > 0) {
+      cfg.maxTokens = mt;
+    }
     ConfigService.get().setConfig(cfg);
     this.viewModel.refreshNeedsConfig();
     this.onConfigSaved();

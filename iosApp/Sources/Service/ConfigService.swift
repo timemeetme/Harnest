@@ -90,12 +90,12 @@ final class ConfigService {
     }
 
     /// Save one provider entry; non-empty apiKey == enabled.
-    func setConfig(provider: String, apiKey: String, baseUrl: String, models: [String], defaultModel: String) {
+    func setConfig(provider: String, apiKey: String, baseUrl: String, models: [String], defaultModel: String, maxTokens: Int? = nil) {
         lock.lock(); defer { lock.unlock() }
         var c = loadLocked()
         let trimmedKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let effectiveBase = baseUrl.isEmpty ? (Providers.metaOf(provider)?.baseUrl ?? "") : baseUrl
-        let entry: [String: Any] = [
+        var entry: [String: Any] = [
             "provider": provider,
             "apiKey": trimmedKey,
             "baseUrl": effectiveBase,
@@ -103,6 +103,9 @@ final class ConfigService {
             "defaultModel": defaultModel.isEmpty ? (models.first ?? "") : defaultModel,
             "enabled": !trimmedKey.isEmpty,
         ]
+        if let mt = maxTokens, mt > 0 {
+            entry["maxTokens"] = mt
+        }
         var configs = (c["configs"] as? [String: Any]) ?? [:]
         configs[provider] = entry
         c["configs"] = configs
@@ -170,12 +173,16 @@ final class ConfigService {
         for item in usable {
             var models = jsonStrings(item["models"])
             if models.isEmpty { models = [item["defaultModel"] as? String ?? ""] }
-            profiles.append([
+            var profile: [String: Any] = [
                 "provider": item["provider"] as? String ?? "",
                 "baseUrl": item["baseUrl"] as? String ?? "",
                 "apiKey": item["apiKey"] as? String ?? "",
                 "models": models.map { ["id": $0] as [String: Any] },
-            ])
+            ]
+            if let mt = item["maxTokens"] as? Int, mt > 0 {
+                profile["maxTokens"] = mt
+            }
+            profiles.append(profile)
         }
         return [
             "cwd": cwd,
@@ -217,7 +224,7 @@ final class ConfigService {
             var baseUrl = obj["baseUrl"] as? String ?? ""
             if baseUrl.isEmpty { baseUrl = meta.baseUrl }
             if provider == Providers.gemini && !baseUrl.contains("/openai") { baseUrl = meta.baseUrl }
-            let entry: [String: Any] = [
+            var entry: [String: Any] = [
                 "provider": provider,
                 "apiKey": apiKey,
                 "baseUrl": baseUrl,
@@ -225,6 +232,9 @@ final class ConfigService {
                 "defaultModel": defaultModel,
                 "enabled": true,
             ]
+            if let mt = obj["maxTokens"] as? Int, mt > 0 {
+                entry["maxTokens"] = mt
+            }
             if let existing = configs[provider] as? [String: Any],
                existing["apiKey"] as? String == apiKey,
                existing["defaultModel"] as? String == defaultModel {
@@ -248,14 +258,18 @@ final class ConfigService {
             guard let item = (c["configs"] as? [String: Any])?[p] as? [String: Any] else { continue }
             let apiKey = (item["apiKey"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if apiKey.isEmpty { continue }
-            configs.append([
+            var exported: [String: Any] = [
                 "provider": item["provider"] as? String ?? p,
                 "apiKey": apiKey,
                 "model": item["defaultModel"] as? String ?? "",
                 "baseUrl": item["baseUrl"] as? String ?? "",
                 "models": item["models"] ?? [],
                 "defaultModel": item["defaultModel"] as? String ?? "",
-            ])
+            ]
+            if let mt = item["maxTokens"] as? Int, mt > 0 {
+                exported["maxTokens"] = mt
+            }
+            configs.append(exported)
         }
         let out: [String: Any] = [
             "version": 1,
