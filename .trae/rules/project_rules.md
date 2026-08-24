@@ -3,7 +3,7 @@
 > 本文件是 TRAE 项目记忆：每次会话自动加载，新会话开工前先读这里，避免重复踩坑。
 > 由 TRAE 生成并按项目进展自动维护：每次会话发生实质变更（新提交/新结论/新陷阱）时由当前会话直接更新。人工修改请同步更新「维护日志」。
 >
-> 最后同步 HEAD: 73efc45193 （2026-08-24，Windows 机）
+> 最后同步 HEAD: 8c78bd6e89 （2026-08-24，Windows 机）
 
 ## 项目身份
 
@@ -110,7 +110,7 @@ Copy-Item tools\harness-transpiler\output\harness.js harmonyApp\entry\src\main\r
 11. **xcodegen 工程名链**：project.yml `name: Harnest` → 生成 `Harnest.xcodeproj`。CI 里 `xcodebuild -project`、`-archivePath`、artifact 路径必须全部匹配该名；archive 后 .app 位于 `build/<name>.xcarchive/Products/Applications/`，**不是** `build/Release-iphoneos/`
 12. **Harmony CI 三坑**（418e7df/19a355b 修复）：Node 20 会挂需 22；`capability-manual.ts` 是 transpiler 构建源必须 git track（.gitignore 误伤过）；hvigor 打包步骤 best-effort（无签名证书，失败不阻塞）
 13. **会话中断丢修改**：TRAE 会话上下文丢失恢复后，先前已"写入文件"的修改可能部分丢失——恢复后必须 `git diff` 与错误清单逐条核对再提交。**变体（2026-08-24 实测）：同一文件的多处编辑禁止并行调用编辑工具——并行写入互相覆盖，仅最后执行的那处存活（三处并行编辑只活了一处）；必须串行逐处编辑并逐处验证落盘**
-14. **max-tokens 截断三症状链**（73efc45 修复）：深度思考计入 DeepSeek `max_tokens` 输出额度，难问题思考中途耗尽 → API `finish_reason:"length"` → 内核 `reason={kind:'max-tokens'}`（**无 error 字段**）→ 三端宿主 describeReason 只查 `reason.error` 落"模型未返回内容"默认文案；同时内核截断时丢 tool-call blocks（UI 显示 0 步）、think 显示 slice(0,8000) 封顶。宿主 buildEngineConfig/refreshProfiles 均**未传 maxTokens**，内核 buildConnection 兜底 8192。修复：内核 chat() 补 max-tokens 文案 + deepseek reasoner 系模型模型级 maxTokens=65536（模型级覆盖 connection 级，链路 `configured?.maxTokens ?? connection.maxTokens`）+ 三端宿主兜底。新增 reason kind 处理时记得它不一定带 error 字段
+14. **max-tokens 截断三症状链**（73efc45 修复）：深度思考计入 DeepSeek `max_tokens` 输出额度，难问题思考中途耗尽 → API `finish_reason:"length"` → 内核 `reason={kind:'max-tokens'}`（**无 error 字段**）→ 三端宿主 describeReason 只查 `reason.error` 落"模型未返回内容"默认文案；同时内核截断时丢 tool-call blocks（UI 显示 0 步）、think 显示 slice(0,8000) 封顶。宿主 buildEngineConfig/refreshProfiles 均**未传 maxTokens**，内核 buildConnection 兜底 8192。修复：内核 chat() 补 max-tokens 文案 + deepseek reasoner 系模型模型级 maxTokens=65536（模型级覆盖 connection 级，链路 `configured?.maxTokens ?? connection.maxTokens`）+ 三端宿主兜底。新增 reason kind 处理时记得它不一定带 error 字段。【修订 2026-08-24，8c78bd6e89】已打通 provider 级 maxTokens 用户配置：三端 provider 编辑页新增「最大输出 Tokens」输入框（留空走默认），api_config.json 持久化 + buildEngineConfig 透传 + 导入导出兼容；用户配置后内核跳过 reasoner 65536 硬编码、统一按用户值生效（决定链：模型级 > provider 级用户配置 > reasoner 硬编码 > 兜底 8192）
 
 ## 环境事实
 
@@ -127,9 +127,9 @@ Copy-Item tools\harness-transpiler\output\harness.js harmonyApp\entry\src\main\r
 - ✅ XCTest **14/14 通过**（Mac，EngineBridgeTests 6 + LocalEngineFlowTests 4 + ProvidersCatalogTests 4，iPhone 17 Pro 模拟器）
 - ✅ iOS Debug + Release 构建通过（Mac 本地 + CI 双验证）
 - ✅ `:shared:iosSimulatorArm64Test` 通过；XCFramework 51MB（ios-arm64 + ios-arm64_x86_64-simulator 双 slice）
-- ✅ Windows `:app:compileDebugKotlin --offline` 通过（73efc45193 时点复验，21s）
-- ✅ Windows transpiler 打包链路（73efc45193）：build.mjs + patch.mjs + check-quickjs-compat PASS + 三端分发 SHA256 一致
-- ⬜ 未验证：kernel.sh/kernel.ps1 内核子模块管理命令；真机回归 NO_ADAPTER 修复（清空 deepseek key 后重开旧会话应回落默认 provider 不报错）；真机回归 max-tokens 修复（deepseek-reasoner 问难题应完整出答案不截断）
+- ✅ Windows `:app:compileDebugKotlin --offline` 通过（8c78bd6e89 时点复验，4s——maxTokens 配置链改动后）
+- ✅ Windows transpiler 打包链路（8c78bd6e89 复验）：build.mjs + patch.mjs + check-quickjs-compat PASS + 三端分发 SHA256 一致（1BEB4F94…）
+- ⬜ 未验证：kernel.sh/kernel.ps1 内核子模块管理命令；真机回归 NO_ADAPTER 修复（清空 deepseek key 后重开旧会话应回落默认 provider 不报错）；真机回归 max-tokens 修复（deepseek-reasoner 问难题应完整出答案不截断）；真机验证 maxTokens 用户配置生效（设置页填 1024 问长答案应截断、填 65536 应完整）
 
 ## CI 修复史（8 轮迭代，2026-08-22，Windows 端）
 
@@ -162,3 +162,4 @@ Mac 端后续（2026-08-23）：c5d5d82e71（ConfigService 缓存回写值语义
 - 2026-08-23 维护协议新增第 3 条（基线 f2b48c5489）：会话内进展自动更新记忆并推送 GitHub（用户确认采用"仅会话内"模式，不建定时任务）
 - 2026-08-23 协议第 1 条升级（基线 c36c6626f2）：开工前先 pull 记忆文件，形成"pull → 干活 → push"闭环，双机 TRAE 会话同等生效
 - 2026-08-24 Windows 端（基线 73efc45193）：修复鸿蒙"0步 8000字思考→模型未返回内容" bug（max-tokens 截断三症状链，见陷阱 14）；CI 三端复绿（iOS 11m16s）；沉淀 transpiler 打包分发命令段；本会话两次踩中陷阱 13（内核 chat 文案、记忆文件 3 处改动均 diff 核对后发现丢失重做）
+- 2026-08-24 Windows 端（8c78bd6e89）：打通 provider 级 maxTokens 用户配置链（内核 buildConnection 用户值跳过 reasoner 硬编码 + 三端 ConfigService 持久化/透传/导入导出 + 三端 provider 编辑页输入框，27 处改动全部串行编辑零丢失——陷阱 13 变体防护生效）；陷阱 14 修订补充决定链；Android 编译 4s 通过、三端分发 SHA256 一致
