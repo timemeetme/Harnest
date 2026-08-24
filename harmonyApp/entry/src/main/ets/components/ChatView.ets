@@ -507,7 +507,10 @@ export struct ChatView {
                 .padding({ left: 20, right: 12, top: 9, bottom: 9 })
                 .borderRadius(8)
                 .onClick(() => {
-                  // 点击模型 → 展开思考模式二级选项（默认/关闭/标准/最高）
+                  // 选模型即生效（effort 保留当前值），思考模式可后续独立调整
+                  this.viewModel.setSessionModel(p.provider, model,
+                    this.viewModel.state.currentSession?.effort ?? '');
+                  // 点击模型 → 展开/收起思考模式二级选项
                   this.drillModel = this.drillModel === p.provider + '/' + model
                     ? '' : p.provider + '/' + model;
                 })

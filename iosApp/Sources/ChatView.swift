@@ -1405,7 +1405,8 @@ struct ModelPickerView: View {
         let selected = app.currentSession?.provider == row.provider
             && app.currentSession?.model == row.model
         return Button {
-            // 两级钻取：先选模型，再定思考强度（nil = 跟随服务端默认）
+            // 选模型即生效（effort 保留当前值或 nil 默认），思考模式可后续独立调整
+            app.applyModel(provider: row.provider, model: row.model, effort: app.currentSession?.effort)
             withAnimation { drill = DrillTarget(provider: row.provider, model: row.model) }
         } label: {
             HStack {

@@ -940,7 +940,11 @@ private fun ModelPicker(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable { drill = provider to model }
+                            .clickable {
+                                // 选模型即生效（effort 保留当前值），思考模式可后续独立调整
+                                onSelect(provider, model, currentEffort)
+                                drill = provider to model
+                            }
                             .padding(horizontal = 20.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -993,10 +997,10 @@ private fun ModelPicker(
             }
             val onThisModel = dProvider == currentProvider && dModel == currentModel
             listOf(
-                null to "跟随服务端默认设置",
-                "off" to "不输出思考过程，速度最快",
-                "high" to "标准思考模式",
-                "max" to "最高强度思考，耗时更长",
+                null to "跟随服务端默认",
+                "off" to "不产出思考，速度最快",
+                "high" to "常规思考",
+                "max" to "深度思考，耗时更长",
             ).forEach { (effortId, desc) ->
                 val selected = onThisModel && currentEffort == effortId
                 Row(

@@ -20,12 +20,12 @@ export interface EffortOption {
   hint: string;
 }
 
-/** k1/k19 思考模式面板选项（对齐 Android 蓝本文案） */
+/** k1/k19 思考模式面板选项（三端统一文案） */
 export const EFFORT_OPTIONS: EffortOption[] = [
-  { value: null, label: '默认', hint: '跟随服务端默认设置' },
-  { value: 'off', label: '关闭', hint: '不输出思考过程，速度最快' },
-  { value: 'high', label: '标准', hint: '标准思考模式' },
-  { value: 'max', label: '最高', hint: '最高强度思考，耗时更长' }
+  { value: null, label: '默认', hint: '跟随服务端默认' },
+  { value: 'off', label: '关闭思考', hint: '不产出思考，速度最快' },
+  { value: 'high', label: '思考', hint: '常规思考' },
+  { value: 'max', label: '深度思考', hint: '深度思考，耗时更长' }
 ];
 
 /** k1：reasoningEffort 合法值校验（持久化前过滤脏数据） */
