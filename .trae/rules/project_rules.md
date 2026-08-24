@@ -3,7 +3,7 @@
 > 本文件是 TRAE 项目记忆：每次会话自动加载，新会话开工前先读这里，避免重复踩坑。
 > 由 TRAE 生成并按项目进展自动维护：每次会话发生实质变更（新提交/新结论/新陷阱）时由当前会话直接更新。人工修改请同步更新「维护日志」。
 >
-> 最后同步 HEAD: 214532ffd3 （2026-08-25，Windows 机：鸿蒙 ArkTS 编译错误修复 + 真机 6HR0226328004267 构建装机运行，见陷阱 19；前一基线 f36ae0b4e2 为 Mac 万字思考卡死 + NSNull 崩溃双修复，陷阱 17/18）
+> 最后同步 HEAD: f2e4d6d905 （2026-08-25，Mac 机：思考/回复分段三级折叠 + 150ms 节流 + 三端 UI 功能补齐与一致性对齐（批次 1-3），见 1fbdcfdba7/b3f694e194/f2e4d6d905；前一基线 214532ffd3 为 Windows 鸿蒙 ArkTS 修复 + 真机装机）
 
 ## 项目身份
 
@@ -169,7 +169,9 @@ Copy-Item tools\harness-transpiler\output\harness.js harmonyApp\entry\src\main\r
 - ✅ Windows `:app:compileDebugKotlin --offline` 通过（8c78bd6e89 时点复验，4s——maxTokens 配置链改动后）
 - ✅ Windows transpiler 打包链路（8c78bd6e89 复验）：build.mjs + patch.mjs + check-quickjs-compat PASS + 三端分发 SHA256 一致（1BEB4F94…）
 - ✅ **鸿蒙本地构建 + 真机装机**（2026-08-25，214532ffd3）：hvigorw assembleHap BUILD SUCCESSFUL（~10s）+ 本地调试证书 SignHap + hdc install -r + aa start，真机 6HR0226328004267 进程存活（含 f36ae0b4e2 合流后代码）；构建中修复 4 处 ArkTS ERROR（见陷阱 19）
-- ⬜ 未验证：kernel.sh/kernel.ps1 内核子模块管理命令；真机回归 NO_ADAPTER 修复（清空 deepseek key 后重开旧会话应回落默认 provider 不报错）；真机回归 max-tokens 修复（deepseek-reasoner 问难题应完整出答案不截断）；真机验证 maxTokens 用户配置生效（设置页填 1024 问长答案应截断、填 65536 应完整）；**真机回归万字思考（deepseek-reasoner 问难题：思考过程应流畅刷新不卡死、回合结束不崩溃）**；Android 端 f36ae0b4e2/214532ffd3 编译验证（靠 CI）
+- ✅ **Mac 本地 Android 编译验证**（2026-08-25，f2e4d6d905）：`ANDROID_HOME=~/Library/Android/sdk JAVA_HOME=/opt/homebrew/opt/openjdk@17/... sh ./gradlew -p androidApp :app:compileDebugKotlin --offline -q` 通过（Mac 也有 Android SDK，不必等 CI）；同日 iOS build + XCTest 14/14（iPhone 17e）于 f2e4d6d905 复验通过
+- ✅ **三端 UI 功能一致性矩阵 26 项全对齐**（2026-08-25，f2e4d6d905）：思考分段三级折叠/回复折叠/节流/代码块复制/错误重试/会话重命名/提问卡跳过/清空消息/token 用量/重新生成/回到底部（贴底才跟随）/工具卡展开/steer+subagent 渲染/评分/fork/停止/排队转向/后台任务卡/会话管理/Provider+maxTokens/导入导出/详情页/深色/Markdown 全集
+- ⬜ 未验证：kernel.sh/kernel.ps1 内核子模块管理命令；真机回归 NO_ADAPTER 修复（清空 deepseek key 后重开旧会话应回落默认 provider 不报错）；真机回归 max-tokens 修复（deepseek-reasoner 问难题应完整出答案不截断）；真机验证 maxTokens 用户配置生效（设置页填 1024 问长答案应截断、填 65536 应完整）；**真机回归万字思考（deepseek-reasoner 问难题：思考过程应流畅刷新不卡死、回合结束不崩溃）**；**Harmony 端 f2e4d6d905 编译验证（靠 CI；批次 1-3 共 5 文件 ArkTS 改动未本地构建）**
 
 ## CI 修复史（8 轮迭代，2026-08-22，Windows 端）
 
@@ -209,3 +211,4 @@ Mac 端后续（2026-08-23）：c5d5d82e71（ConfigService 缓存回写值语义
 - 2026-08-25 Mac 端真机适配（23130e84fa）：清零真机构建 12 处 API 弃用警告（见陷阱 16）——部署目标 16.0→17.0 + onChange/EKEventStore/UIScreen.main 新 API + orientations 补全，涉及 project.yml/Info.plist/ChatView/DeviceBridge 共 4 文件；真机 MyPhone (iPhone 17 Pro/iOS 27 beta) 已连接；真机 clean build（CODE_SIGNING_ALLOWED=NO）0 警告 + XCTest 14/14 通过
 - 2026-08-25 Mac 端双修复（f36ae0b4e2）：①万字思考卡死（内核 emit 阈值 16字/60ms→64字/200ms + iOS 150ms 节流/flushPendingThink 收尾补偿 + 渲染尾部 4000 字封顶 + 日志 240 字截断）；②NSJSONSerialization 顶层 NSNull 崩溃（内核 extractDetails undefined 化剥离 null 字段 + iOS encodeString NSNull 守卫/isValidJSONObject 前置，见陷阱 17/18——try? 接不住 ObjC 异常已实证）。会话中断恢复后按陷阱 13 diff 核对九处编辑全部存活；transpiler 打包 + QuickJS 门禁 PASS + 三端分发 SHA256 一致（dfe359c7）+ 模拟器构建 + XCTest 14/14（**模拟器 runtime 更新 OS 26.5，iPhone 17 Pro 没了改用 iPhone 17e**）；Mac 首次本地验证 transpiler 打包链路
 - 2026-08-25 Windows 端鸿蒙装机（214532ffd3）：拉取 Mac 12 提交后本地构建 HAP 首次暴露 4 处 ArkTS ERROR（ChatView 引用 UiState 不存在的 state.currentSession，CI best-effort 全绿没拦，见陷阱 19）→ AppViewModel 加 currentSession() 辅助方法修复；本地调试证书 SignHap + hdc install -r + aa start，真机 6HR0226328004267 运行存活；期间 Mac 并行推 f36ae0b4e2 → pull --rebase 合流后重新构建重装（新 PID 4819）；沉淀 Windows 鸿蒙构建装机命令段 + 环境事实（锁屏时 aa start 报 10106102 需人工解锁；package-lock.json 勿提交）；会话中断恢复后按陷阱 13 diff 核对确认无丢失
+- 2026-08-25 Mac 端三连提交（1fbdcfdba7 → b3f694e194 → f2e4d6d905）：①**思考/回复分段三级折叠**（内核 extractDetails 按 (turn,step) 切段 + 概览/分段/全文三级 UI，对标 trae/workbuddy）；②**三端统一 150ms 节流**（think+answer 双缓冲，修复万字思考卡死——iOS 11584 字卡住后一次性蹦出的根因是宿主窗口与内核心跳同频 200ms 相位锁死 + 主线程逐字渲染压力）；③**三端 UI 功能补齐批次 1-3**（代码块复制/错误重试/会话重命名/提问卡跳过/清空消息/token 用量 in+out/🔄 重新生成/回到底部悬浮按钮（贴底判定：iOS PreferenceKey minY<400、Android derivedStateOf last≥total-3、Harmony onScrollIndex last≥total-2，贴底才自动跟随）/工具卡点击展开/steer 展开行/subagent 专属行）+ 一致性终检 26 项全对齐。验证：iOS build+XCTest 14/14、Android Mac 本地 compileDebugKotlin（**Mac 也有 Android SDK ~/Library/Android/sdk，带 ANDROID_HOME 即可本地编译不必等 CI**）、Harmony 落盘待 CI；会话两次中断恢复均按陷阱 13 diff 核对（Android 🔄 按钮本体丢失一次、记忆文件核对一次）
