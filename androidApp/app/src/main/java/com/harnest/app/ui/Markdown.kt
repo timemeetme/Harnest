@@ -18,10 +18,16 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
@@ -38,6 +44,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 
 /**
  * k6 手写 Markdown 渲染（零外部依赖 — Compose BOM 内手搓）。
@@ -568,18 +575,47 @@ private fun AnnotatedString.Builder.appendPlainSegment(seg: String, keywords: Se
 private fun CodeBlock(lang: String, code: String) {
     val c = harnessColors()
     val highlighted = highlightCode(code, lang, c)
+    // 一键复制（右上角胶囊）：copied 态 1.2s 后自动复位
+    var copied by remember { mutableStateOf(false) }
+    LaunchedEffect(copied) {
+        if (copied) {
+            delay(1200)
+            copied = false
+        }
+    }
+    val clipboard = LocalClipboardManager.current
     Box(
         Modifier
             .fillMaxWidth()
             .background(c.surface, RoundedCornerShape(8.dp)),
     ) {
-        if (lang.isNotBlank()) {
+        Row(
+            Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 5.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (lang.isNotBlank()) {
+                Text(
+                    lang,
+                    color = c.textHint,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(end = 6.dp),
+                )
+            }
             Text(
-                lang,
-                color = c.textHint,
+                if (copied) "已复制" else "复制",
+                color = if (copied) c.primary else c.textHint,
                 fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
-                modifier = Modifier.align(Alignment.TopEnd).padding(top = 6.dp, end = 10.dp),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(c.surfaceElevated.copy(alpha = 0.9f))
+                    .clickable {
+                        clipboard.setText(AnnotatedString(code))
+                        copied = true
+                    }
+                    .padding(horizontal = 7.dp, vertical = 3.dp),
             )
         }
         SelectionContainer {

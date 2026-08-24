@@ -1,5 +1,6 @@
 import { ThemeColors } from '../theme/Theme';
 import measure from '@ohos.measure';
+import { pasteboard } from '@kit.BasicServicesKit';
 
 /**
  * 轻量 Markdown 渲染（对齐 Android Markdown.kt 蓝本的子集）：
@@ -489,6 +490,65 @@ struct MdRich {
   }
 }
 
+/** 代码块：右上角 lang 标签 + 复制按钮（copied 1.2s 自动复位，对齐 iOS/Android CodeBlock） */
+@Component
+struct MdCode {
+  @Prop code: string = '';
+  @Prop lang: string = '';
+  @Prop theme: ThemeColors = new ThemeColors();
+  @State copied: boolean = false;
+
+  private doCopy(): void {
+    try {
+      const data = pasteboard.createData(pasteboard.MIMETYPE_TEXT_PLAIN, this.code);
+      pasteboard.getSystemPasteboard().setData(data).then(() => {
+        this.copied = true;
+        setTimeout(() => {
+          this.copied = false;
+        }, 1200);
+      }).catch(() => {
+      });
+    } catch (_e) {
+    }
+  }
+
+  build() {
+    Column({ space: 3 }) {
+      if (this.lang.length > 0 || this.code.length > 0) {
+        Row() {
+          if (this.lang.length > 0) {
+            Text(this.lang).fontSize('9fp').fontColor(this.theme.textHint)
+              .layoutWeight(1)
+          }
+          Text(this.copied ? '已复制' : '复制').fontSize('10fp')
+            .fontColor(this.copied ? this.theme.primary : this.theme.textHint)
+            .padding({ left: 8, right: 8, top: 2, bottom: 2 })
+            .borderRadius(8)
+            .backgroundColor(this.theme.surfaceElevated)
+            .onClick(() => {
+              this.doCopy();
+            })
+        }
+        .width('100%')
+      }
+      Scroll() {
+        Text(this.code)
+          .fontSize('12fp')
+          .fontFamily('monospace')
+          .fontColor(this.theme.textPrimary)
+          .lineHeight(17)
+      }
+      .constraintSize({ maxHeight: 300 })
+      .scrollBar(BarState.Auto)
+      .align(Alignment.TopStart)
+    }
+    .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+    .borderRadius(8)
+    .backgroundColor(this.theme.background)
+    .border({ width: 0.5, color: this.theme.divider })
+  }
+}
+
 /** Markdown 渲染入口（对齐 Android MarkdownBody） */
 @Component
 export struct MarkdownView {
@@ -520,25 +580,7 @@ export struct MarkdownView {
   @Builder
   blockBody(b: MdBlock) {
     if (b.kind === 'code') {
-      Column({ space: 3 }) {
-        if (b.lang.length > 0) {
-          Text(b.lang).fontSize('9fp').fontColor(this.theme.textHint)
-        }
-        Scroll() {
-          Text(b.code)
-            .fontSize('12fp')
-            .fontFamily('monospace')
-            .fontColor(this.theme.textPrimary)
-            .lineHeight(17)
-        }
-        .constraintSize({ maxHeight: 300 })
-        .scrollBar(BarState.Auto)
-        .align(Alignment.TopStart)
-      }
-      .padding({ left: 10, right: 10, top: 8, bottom: 8 })
-      .borderRadius(8)
-      .backgroundColor(this.theme.background)
-      .border({ width: 0.5, color: this.theme.divider })
+      MdCode({ code: b.code, lang: b.lang, theme: this.theme })
     } else if (b.kind === 'heading') {
       MdRich({
         src: b.plain,

@@ -8,6 +8,10 @@ struct ChatView: View {
     @State private var draft = ""
     @State private var showDrawer = false
     @State private var showModelPicker = false
+    @State private var renameTarget: SessionRecord?
+    @State private var renameText = ""
+    /// 滚动位置追踪：底部锚点距可视区顶 <400pt 视为"贴底"，贴底才自动跟随流式更新；离开后显示"回到底部"悬浮按钮。
+    @State private var atBottom = true
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -31,6 +35,18 @@ struct ChatView: View {
         .sheet(isPresented: $showModelPicker) {
             ModelPickerView()
                 .presentationDetents([.medium, .large])
+        }
+        // 会话重命名：抽屉 ✏️ 触发（iOS 16+ alert 内嵌 TextField）
+        .alert("重命名会话", isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        )) {
+            TextField("会话标题", text: $renameText)
+            Button("取消", role: .cancel) { renameTarget = nil }
+            Button("确定") {
+                if let t = renameTarget { app.renameSession(t.id, title: renameText) }
+                renameTarget = nil
+            }
         }
     }
 
@@ -122,6 +138,19 @@ struct ChatView: View {
                 .accessibilityLabel("压缩会话历史")
             }
 
+            // 清空当前会话消息（消息非空且空闲时可用）
+            if !(app.currentSession?.messages.isEmpty ?? true) && !app.busy {
+                Button {
+                    app.clearMessages()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(width: 34, height: 34)
+                }
+                .accessibilityLabel("清空当前会话消息")
+            }
+
             Button {
                 app.newSession()
             } label: {
@@ -155,39 +184,81 @@ struct ChatView: View {
 
     private var messageList: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(spacing: 10) {
-                    let messages = app.currentSession?.messages ?? []
-                    if messages.isEmpty {
-                        emptyState
-                    } else {
-                        ForEach(messages) { msg in
-                            MessageRow(message: msg)
-                                .id(msg.id)
+            ZStack(alignment: .bottom) {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        let messages = app.currentSession?.messages ?? []
+                        if messages.isEmpty {
+                            emptyState
+                        } else {
+                            ForEach(messages) { msg in
+                                MessageRow(message: msg)
+                                    .id(msg.id)
+                            }
                         }
+                        // 底部锚点：向 chatScroll 命名空间报告自身位置，驱动贴底判定
+                        Color.clear.frame(height: 1)
+                            .id("chatBottom")
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear.preference(
+                                        key: ChatBottomAnchorKey.self,
+                                        value: geo.frame(in: .named("chatScroll")).minY < 400
+                                    )
+                                }
+                            )
                     }
-                    Color.clear.frame(height: 1).id("chatBottom")
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .padding(.bottom, 16)
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 16)
+                .coordinateSpace(name: "chatScroll")
+
+                // 离开底部后显示：一键回底继续跟随流式输出（对标 ChatGPT/Trae）
+                if !atBottom {
+                    Button {
+                        atBottom = true
+                        scrollToBottom(proxy)
+                    } label: {
+                        Text(app.busy ? "⌄ 回到底部 · 跟随最新" : "⌄ 回到底部")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(app.busy ? Theme.primary : Theme.textPrimary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(Theme.surface)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().strokeBorder(Theme.border, lineWidth: 0.5))
+                    }
+                    .padding(.bottom, 8)
+                    .accessibilityLabel("回到底部")
+                }
             }
             .onAppear {
                 scrollToBottom(proxy, animated: false)
             }
             .onChange(of: app.currentSession?.id) {
+                atBottom = true
                 scrollToBottom(proxy, animated: false)
             }
             .onChange(of: app.currentSession?.messages.count) {
-                scrollToBottom(proxy)
+                if atBottom { scrollToBottom(proxy) }
             }
             .onChange(of: app.liveItems.count) {
-                scrollToBottom(proxy)
+                if atBottom { scrollToBottom(proxy) }
             }
             .onChange(of: app.liveItems.reduce(0) { $0 + $1.text.count }) {
-                scrollToBottom(proxy)
+                if atBottom { scrollToBottom(proxy) }
             }
+            .onPreferenceChange(ChatBottomAnchorKey.self) { atBottom = $0 }
             .onTapGesture { inputFocused = false }
+        }
+    }
+
+    /// 底部锚点可见性：chatScroll 命名空间内 minY < 400pt 视为贴底。
+    private struct ChatBottomAnchorKey: PreferenceKey {
+        static var defaultValue: Bool = true
+        static func reduce(value: inout Bool, nextValue: () -> Bool) {
+            value = nextValue()
         }
     }
 
@@ -421,6 +492,9 @@ struct ChatView: View {
                                 withAnimation(.easeOut(duration: 0.18)) { showDrawer = false }
                             } onDelete: {
                                 app.deleteSession(s)
+                            } onRename: {
+                                renameTarget = s
+                                renameText = s.title
                             }
                         }
                     }
@@ -481,7 +555,7 @@ private struct AssistantBubble: View {
     @EnvironmentObject var app: AppStore
     let message: StoredMessage
 
-    private var isError: Bool { message.id.hasPrefix("err_") }
+    private var isError: Bool { message.isError || message.id.hasPrefix("err_") }
 
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
@@ -489,7 +563,7 @@ private struct AssistantBubble: View {
                 if !metaLine.isEmpty {
                     Text(metaLine)
                         .font(.system(size: 10))
-                        .foregroundStyle(Theme.textHint)
+                        .foregroundStyle(isError ? Theme.error : Theme.textHint)
                 }
                 // 轨迹回放：traceJson → LiveItem（历史消息的思考/工具/转向折叠面板）
                 if let trace = message.traceJson, !trace.isEmpty {
@@ -502,7 +576,7 @@ private struct AssistantBubble: View {
                 if let todos = message.todosJson, !todos.isEmpty {
                     TodoSnapshot(json: todos)
                 }
-                if !isError { actionRow }
+                actionRow
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
@@ -519,7 +593,20 @@ private struct AssistantBubble: View {
         }
         if let m = message.model, !m.isEmpty { parts.append(m) }
         if message.durationMs > 0 { parts.append("⏱\(AssistantBubble.fmtDuration(message.durationMs))") }
+        // token 用量 + 速率（usage surfaced；tok/s = outTok / 时长秒）
+        if message.inTok > 0 || message.outTok > 0 {
+            parts.append("↑\(AssistantBubble.fmtTok(message.inTok)) ↓\(AssistantBubble.fmtTok(message.outTok))")
+            if message.outTok > 0, message.durationMs > 1000 {
+                let tps = Double(message.outTok) / (Double(message.durationMs) / 1000.0)
+                parts.append(String(format: "%.0f tok/s", tps))
+            }
+        }
         return parts.joined(separator: " · ")
+    }
+
+    static func fmtTok(_ n: Int64) -> String {
+        if n >= 1000 { return String(format: "%.1fk", Double(n) / 1000.0) }
+        return "\(n)"
     }
 
     static func fmtDuration(_ ms: Int64) -> String {
@@ -528,28 +615,59 @@ private struct AssistantBubble: View {
         return "\(s / 60)m\(s % 60)s"
     }
 
-    /// 尾部操作：👍👎 评分（选中高亮 pill）/ 📋 复制 / 🍴 fork 分叉。
+    /// 尾部操作：错误消息 = 🔄 重试 + 📋 复制；正常 = 👍👎 评分 / 📋 复制 / 🍴 fork 分叉。
+    @ViewBuilder
     private var actionRow: some View {
         HStack(spacing: 6) {
-            rateButton("👍", 1)
-            rateButton("👎", -1)
-            Rectangle()
-                .fill(Theme.border)
-                .frame(width: 1, height: 14)
-                .padding(.horizontal, 2)
-            Button {
-                UIPasteboard.general.string = message.content
-                app.toast("📋 已复制回复内容")
-            } label: {
-                Text("📋").font(.system(size: 13)).frame(width: 30, height: 26)
+            if isError {
+                Button {
+                    Task { await app.retryFromMessage(message.id) }
+                } label: {
+                    HStack(spacing: 3) {
+                        Text("🔄").font(.system(size: 12))
+                        Text("重试").font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundStyle(Theme.error)
+                    .frame(height: 26)
+                    .padding(.horizontal, 8)
+                    .background(Theme.errorDim)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                .disabled(app.busy)
+                .accessibilityLabel("重试本轮提问")
+                Button {
+                    UIPasteboard.general.string = message.content
+                } label: {
+                    Text("📋").font(.system(size: 13)).frame(width: 30, height: 26)
+                }
+                .accessibilityLabel("复制错误信息")
+            } else {
+                rateButton("👍", 1)
+                rateButton("👎", -1)
+                Rectangle()
+                    .fill(Theme.border)
+                    .frame(width: 1, height: 14)
+                    .padding(.horizontal, 2)
+                Button {
+                    Task { await app.retryFromMessage(message.id) }
+                } label: {
+                    Text("🔄").font(.system(size: 13)).frame(width: 30, height: 26)
+                }
+                .accessibilityLabel("重新生成本轮回复")
+                Button {
+                    UIPasteboard.general.string = message.content
+                    app.toast("📋 已复制回复内容")
+                } label: {
+                    Text("📋").font(.system(size: 13)).frame(width: 30, height: 26)
+                }
+                .accessibilityLabel("复制回复")
+                Button {
+                    app.forkFromMessage(message.id)
+                } label: {
+                    Text("🍴").font(.system(size: 13)).frame(width: 30, height: 26)
+                }
+                .accessibilityLabel("从此处分叉新会话")
             }
-            .accessibilityLabel("复制回复")
-            Button {
-                app.forkFromMessage(message.id)
-            } label: {
-                Text("🍴").font(.system(size: 13)).frame(width: 30, height: 26)
-            }
-            .accessibilityLabel("从此处分叉新会话")
             Spacer(minLength: 0)
         }
         .padding(.top, 2)
@@ -698,6 +816,21 @@ private struct McpImageView: View {
 
 private struct TodoSnapshot: View {
 
+    /// todo 三态图标/配色（done ✓ / in_progress 半填充 ◐ / pending ○），三端一致。
+    enum TodoStyle {
+        static func icon(_ status: String) -> String {
+            if status == "done" || status == "completed" { return "checkmark.circle.fill" }
+            if status == "in_progress" || status == "in-progress" { return "circle.lefthalf.filled" }
+            return "circle"
+        }
+
+        static func color(_ status: String) -> Color {
+            if status == "done" || status == "completed" { return Theme.accent }
+            if status == "in_progress" || status == "in-progress" { return Theme.warning }
+            return Theme.textHint
+        }
+    }
+
     struct Item: Identifiable {
         let id = UUID()
         let content: String
@@ -730,9 +863,9 @@ private struct TodoSnapshot: View {
                 .foregroundStyle(Theme.textHint)
             ForEach(items) { item in
                 HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: item.status == "done" || item.status == "completed" ? "checkmark.circle.fill" : "circle")
+                    Image(systemName: TodoSnapshot.TodoStyle.icon(item.status))
                         .font(.system(size: 11))
-                        .foregroundStyle(item.status == "done" || item.status == "completed" ? Theme.accent : Theme.textHint)
+                        .foregroundStyle(TodoSnapshot.TodoStyle.color(item.status))
                     Text(item.content)
                         .font(.system(size: 11))
                         .foregroundStyle(item.status == "done" || item.status == "completed" ? Theme.textHint : Theme.textSecondary)
@@ -1092,32 +1225,10 @@ private struct LiveItemRow: View {
             LiveToolRow(item: item)
 
         case .steer:
-            // k4 转向条目：⚡ 高亮（下一 step 边界生效）
-            HStack(alignment: .top, spacing: 5) {
-                Text("⚡")
-                    .font(.system(size: 11))
-                Text(item.text)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(Theme.warning)
-                    .lineLimit(3)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(8)
-            .background(Theme.warning.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            SteerLiveRow(item: item)
 
         case .subagent:
-            HStack(alignment: .top, spacing: 5) {
-                Text("🤖")
-                    .font(.system(size: 11))
-                Text(item.text)
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(4)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.leading, 14)
-            .padding(.vertical, 2)
+            SubagentLiveRow(item: item)
 
         case .todos:
             LiveTodosBlock(item: item)
@@ -1125,9 +1236,106 @@ private struct LiveItemRow: View {
     }
 }
 
+/// k4 转向条目：⚡ 高亮行，点击展开注入全文（对齐 Android/Harmony 交互；下一 step 边界生效）。
+private struct SteerLiveRow: View {
+    let item: LiveItem
+
+    @State private var expanded = false
+
+    private var displayText: String {
+        guard expanded, item.text.count > 400 else { return item.text }
+        return "…" + item.text.suffix(400)
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 6) {
+            Text("⚡")
+                .font(.system(size: 11))
+            Text("中途转向")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.warning)
+            Text(displayText)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.textHint)
+                .lineLimit(expanded ? 6 : 1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(expanded ? "▾" : "▸")
+                .font(.system(size: 10))
+                .foregroundStyle(Theme.textHint)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Theme.warning.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onTapGesture { expanded.toggle() }
+    }
+}
+
+/// k7 子代理/workflow 节点：状态色边条 + 🤖 名称 + 阶段 + 运行中点 / 完成态 outcome（对齐 Android/Harmony）。
+private struct SubagentLiveRow: View {
+    let item: LiveItem
+
+    private var running: Bool { item.result.isEmpty }
+    private var failed: Bool {
+        if item.status == "error" { return true }
+        let o = item.result.lowercased()
+        return o.contains("error") || o.contains("fail")
+    }
+    private var statusColor: Color {
+        if running { return Theme.warning }
+        return failed ? Theme.error : Theme.success
+    }
+    private var outcomeText: String {
+        let trimmed = item.result.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "完成" }
+        return trimmed.count > 60 ? String(trimmed.prefix(60)) : trimmed
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            RoundedRectangle(cornerRadius: 1.5)
+                .fill(statusColor)
+                .frame(width: 3, height: 16)
+            Text("🤖")
+                .font(.system(size: 11))
+            Text(item.name.isEmpty ? "子代理" : item.name)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+            if running, !item.status.isEmpty, item.status != "running" {
+                Text(item.status)
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.textHint)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if running {
+                Text("●")
+                    .font(.system(size: 8))
+                    .foregroundStyle(Theme.warning)
+                Text("运行中")
+                    .font(.system(size: 10))
+                    .foregroundStyle(Theme.warning)
+            } else {
+                Text(outcomeText)
+                    .font(.system(size: 10))
+                    .foregroundStyle(statusColor)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.leading, 14)
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 /// 工具步骤行：状态色边条 + 图标 + 名称 + 等宽结果摘要。
 private struct LiveToolRow: View {
     let item: LiveItem
+    /// 点击整卡展开完整参数/结果（对齐 Android/Harmony 工具行）
+    @State private var expanded = false
 
     private var running: Bool { item.status == "running" || item.status == "运行中" }
     private var failed: Bool {
@@ -1169,13 +1377,13 @@ private struct LiveToolRow: View {
                     Text(item.args)
                         .font(.system(size: 9))
                         .foregroundStyle(Theme.textHint)
-                        .lineLimit(2)
+                        .lineLimit(expanded ? 8 : 2)
                 }
                 if !item.result.isEmpty {
                     Text(item.result)
                         .font(.system(size: 10, design: .monospaced))
                         .foregroundStyle(Theme.textHint)
-                        .lineLimit(3)
+                        .lineLimit(expanded ? 14 : 3)
                         .truncationMode(.tail)
                 }
             }
@@ -1184,6 +1392,8 @@ private struct LiveToolRow: View {
         .padding(6)
         .background(Theme.background.opacity(0.45))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onTapGesture { expanded.toggle() }
     }
 }
 
@@ -1202,9 +1412,9 @@ private struct LiveTodosBlock: View {
                 .foregroundStyle(Theme.textHint)
             ForEach(Array(item.todos.enumerated()), id: \.offset) { _, todo in
                 HStack(alignment: .top, spacing: 5) {
-                    Image(systemName: todo.1 == "done" || todo.1 == "completed" ? "checkmark.circle.fill" : "circle")
+                    Image(systemName: TodoSnapshot.TodoStyle.icon(todo.1))
                         .font(.system(size: 10))
-                        .foregroundStyle(todo.1 == "done" || todo.1 == "completed" ? Theme.accent : Theme.textHint)
+                        .foregroundStyle(TodoSnapshot.TodoStyle.color(todo.1))
                     Text(todo.0)
                         .font(.system(size: 10))
                         .foregroundStyle(todo.1 == "done" || todo.1 == "completed" ? Theme.textHint : Theme.textSecondary)
@@ -1259,19 +1469,34 @@ private struct PendingQuestionCard: View {
             }
             .frame(maxHeight: 280)
 
-            Button {
-                Task { await app.answerPendingQuestion(picks) }
-                picks = [:]
-            } label: {
-                Text("提交回答")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.onPrimary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 9)
-                    .background(allAnswered ? Theme.primary : Theme.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            HStack(spacing: 8) {
+                Button {
+                    Task { await app.skipPendingQuestion() }
+                    picks = [:]
+                } label: {
+                    Text("跳过")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(Theme.textSecondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(Theme.background.opacity(0.6))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .accessibilityLabel("跳过提问")
+                Button {
+                    Task { await app.answerPendingQuestion(picks) }
+                    picks = [:]
+                } label: {
+                    Text("提交回答")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Theme.onPrimary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 9)
+                        .background(allAnswered ? Theme.primary : Theme.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                .disabled(!allAnswered)
             }
-            .disabled(!allAnswered)
         }
         .padding(12)
         .background(Theme.surfaceElevated)
@@ -1455,6 +1680,7 @@ private struct SessionRow: View {
     var deletable: Bool = true
     let onOpen: () -> Void
     let onDelete: () -> Void
+    var onRename: (() -> Void)? = nil
 
     private var timeText: String {
         let fmt = DateFormatter()
@@ -1476,6 +1702,16 @@ private struct SessionRow: View {
                         .lineLimit(1)
                 }
                 Spacer()
+                if let onRename {
+                    Button(action: onRename) {
+                        Image(systemName: "pencil")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(Theme.textHint)
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("重命名会话")
+                }
                 if deletable {
                     Button(action: onDelete) {
                         Image(systemName: "xmark")

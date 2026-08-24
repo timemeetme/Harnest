@@ -210,6 +210,48 @@ final class AppStore: ObservableObject {
         refreshSessions()
     }
 
+    /// 会话手动重命名（标题不再只等 LLM 命名）。
+    func renameSession(_ id: String, title: String) {
+        let clean = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty else { return }
+        guard var s = sessions.first(where: { $0.id == id }) else { return }
+        s.title = clean
+        s.updatedAt = nowMs()
+        store.upsert(s)
+        if currentSession?.id == id { currentSession = s }
+        refreshSessions()
+        toast("已重命名")
+    }
+
+    /// 错误重试：重发该错误消息之前最近一条 user 消息（重新问一遍，历史保留）。
+    func retryFromMessage(_ messageId: String) async {
+        guard !busy, let s = currentSession,
+              let idx = s.messages.firstIndex(where: { $0.id == messageId }) else { return }
+        let lastUser = s.messages[..<idx].last(where: { $0.role == "user" })
+        guard let text = lastUser?.content, !text.isEmpty else {
+            toast("未找到可重试的提问")
+            return
+        }
+        await send(text)
+    }
+
+    /// k5 跳过提问：全空 selected 提交（等价"不选直接交卷"，内核按空答案继续）。
+    func skipPendingQuestion() async {
+        guard let pq = pendingQuestion else { return }
+        let answers: [[String: Any]] = pq.questions.map { ["id": $0.id, "selected": [String]()] }
+        pendingQuestion = nil
+        busyHint = ""
+        do {
+            let data = try JSONSerialization.data(withJSONObject: answers)
+            if let json = String(data: data, encoding: .utf8) {
+                _ = try await engine.answerQuestion(qid: pq.qid, answersJson: json)
+            }
+            toast("已跳过")
+        } catch {
+            toast("跳过失败")
+        }
+    }
+
     /// 当前会话切换模型+思考强度（k1：effort nil = 跟随服务端默认）。
     func applyModel(provider: String, model: String, effort: String? = nil) {
         let clean = ReasoningEfforts.isValid(effort) ? effort : nil
@@ -429,7 +471,20 @@ final class AppStore: ObservableObject {
 
         var reply = outcome["replyText"] as? String ?? ""
         if reply.isEmpty { reply = outcome["text"] as? String ?? "" }
-        if reply.isEmpty { reply = describeReason(outcome) }
+        // token 用量 surfaced：内核 extractDetails 的 details.usage（无 = 0 不展示）
+        let usage = details?["usage"] as? [String: Any]
+        let inTok = (usage?["inputTokens"] as? NSNumber)?.int64Value ?? 0
+        let outTok = (usage?["outputTokens"] as? NSNumber)?.int64Value ?? 0
+        // 错误判定：有 reason.error / max-tokens 截断 / 空回复兜底文案 → isError（红色样式 + 重试入口）
+        var failed = false
+        if let reason = outcome["reason"] as? [String: Any] {
+            if reason["error"] as? [String: Any] != nil { failed = true }
+            if (reason["kind"] as? String) == "max-tokens" { failed = true }
+        }
+        if reply.isEmpty {
+            reply = describeReason(outcome)
+            failed = true
+        }
 
         session.messages.append(StoredMessage(
             id: Self.msgId(),
@@ -439,7 +494,10 @@ final class AppStore: ObservableObject {
             model: session.model,
             todosJson: liveItems.isEmpty ? todosJson : nil,
             durationMs: duration,
-            traceJson: trace.isEmpty ? nil : trace
+            traceJson: trace.isEmpty ? nil : trace,
+            isError: failed,
+            inTok: inTok,
+            outTok: outTok
         ))
 
         session.updatedAt = nowMs()

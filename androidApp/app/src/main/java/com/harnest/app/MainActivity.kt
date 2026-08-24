@@ -558,15 +558,25 @@ class MainActivity : ComponentActivity() {
                         )
                     }
                 }
-                val reply = outcome.optString("text", "").trim().ifBlank {
-                    val reason = outcome.optJSONObject("reason")
-                    val err = reason?.optJSONObject("error")
-                    when {
-                        err != null -> "⚠️ " + err.optString("message", err.optString("code", "error"))
+                // token 用量 surfaced：内核 extractDetails 的 details.usage（无 = 0 不展示）
+                val usage = details?.optJSONObject("usage")
+                val inTok = usage?.optLong("inputTokens", 0L) ?: 0L
+                val outTok = usage?.optLong("outputTokens", 0L) ?: 0L
+                // 错误判定：reason.error / max-tokens 截断 / 空回复兜底 → isError（红样式 + 重试入口）
+                var failed = false
+                var reply = outcome.optString("text", "").trim()
+                val reason = outcome.optJSONObject("reason")
+                if (reason?.optJSONObject("error") != null) failed = true
+                if (reason?.optString("kind") == "max-tokens") failed = true
+                if (reply.isEmpty()) {
+                    reply = when {
+                        reason?.optJSONObject("error") != null ->
+                            "⚠️ " + reason.optJSONObject("error")!!.optString("message", reason.optJSONObject("error")!!.optString("code", "error"))
                         reason?.optString("kind") == "max-tokens" ->
                             "（模型输出达到长度上限被截断：深度思考占满了输出额度。可简化问题、降低思考强度，或换用输出额度更大的模型后重试）"
                         else -> "（无回复）"
                     }
+                    failed = true
                 }
                 session.messages.add(
                     StoredMessage(
@@ -575,6 +585,9 @@ class MainActivity : ComponentActivity() {
                         provider = session.provider, model = session.model,
                         durationMs = System.currentTimeMillis() - roundStart,
                         traceJson = traceJson(),
+                        isError = failed,
+                        inTok = inTok,
+                        outTok = outTok,
                     )
                 )
                 session.updatedAt = System.currentTimeMillis()
@@ -598,11 +611,13 @@ class MainActivity : ComponentActivity() {
                 }
                 session.messages.add(
                     StoredMessage(
-                        "e" + System.currentTimeMillis(), "assistant",
+                        // err_ 前缀 = 错误消息（红样式 + 重试入口）；用户主动停止是正常结束，保持 a 前缀
+                        (if (stopped) "a" else "err_") + System.currentTimeMillis(), "assistant",
                         if (stopped) "（本轮已停止）" else "⚠️ ${e.message ?: e.javaClass.simpleName}",
                         System.currentTimeMillis(),
                         durationMs = System.currentTimeMillis() - roundStart,
                         traceJson = traceJson(),
+                        isError = !stopped,
                     )
                 )
                 session.updatedAt = System.currentTimeMillis()
@@ -632,6 +647,52 @@ class MainActivity : ComponentActivity() {
         session.updatedAt = System.currentTimeMillis()
         SessionStore.get(this).upsert(session)
         refreshSessions()
+    }
+
+    /** 会话手动重命名（标题不再只等 LLM 命名）。 */
+    private fun renameSession(id: String, title: String) {
+        val clean = title.trim()
+        if (clean.isEmpty()) return
+        val session = sessions.value.firstOrNull { it.id == id } ?: return
+        session.title = clean
+        session.updatedAt = System.currentTimeMillis()
+        SessionStore.get(this).upsert(session)
+        if (currentSession.value?.id == id) currentSession.value = session
+        refreshSessions()
+        toast("已重命名")
+    }
+
+    /** 错误重试：重发该错误消息之前最近一条 user 消息（重新问一遍，历史保留）。 */
+    private fun retryFromMessage(messageId: String) {
+        if (busy.value) return
+        val session = currentSession.value ?: return
+        val idx = session.messages.indexOfFirst { it.id == messageId }
+        if (idx < 0) return
+        val lastUser = session.messages.subList(0, idx).lastOrNull { it.role == "user" }
+        if (lastUser == null || lastUser.content.isBlank()) {
+            toast("未找到可重试的提问")
+            return
+        }
+        send(lastUser.content)
+    }
+
+    /** 清空当前会话消息（保留会话壳与 provider 选择，重新开始）。 */
+    private fun clearCurrentMessages() {
+        val session = currentSession.value ?: return
+        if (session.messages.isEmpty()) return
+        val updated = session.copy(messages = mutableListOf(), updatedAt = System.currentTimeMillis())
+        SessionStore.get(this).upsert(updated)
+        currentSession.value = updated
+        messagesRev.value++
+        toast("已清空")
+    }
+
+    /** k5 跳过提问：每题提交全空 selected（内核按空答案继续）。 */
+    private fun skipPendingQuestion() {
+        val qid = pendingQid.value
+        val questions = pendingQuestions.value
+        if (qid < 0 || questions.isEmpty()) return
+        submitQuestionAnswer(questions.map { PendingAnswer(it.id, emptyList(), "") })
     }
 
     // ── k6 消息尾部操作 ─────────────────────────────────────
@@ -1234,6 +1295,8 @@ class MainActivity : ComponentActivity() {
             onNewSession = { newSession() },
             onSelectSession = { openSessionById(it) },
             onDeleteSession = { deleteSessionById(it) },
+            onRenameSession = { id, title -> renameSession(id, title) },
+            onClearMessages = { clearCurrentMessages() },
             onSend = { send(it) },
             onStop = { stopCurrent() },
             onQueue = { queueMessage(it.trim()) },
@@ -1243,8 +1306,10 @@ class MainActivity : ComponentActivity() {
             onRate = { m, r -> rateMessage(m, r) },
             onFork = { forkFromMessage(it) },
             onCopy = { copyMessage(it) },
+            onRetry = { m -> retryFromMessage(m.id) },
             pendingQuestions = if (pendingQid.value >= 0) pendingQuestions.value else emptyList(),
             onSubmitAnswers = { submitQuestionAnswer(it) },
+            onSkipQuestions = { skipPendingQuestion() },
             planActive = planModeActive.value,
             onTogglePlan = { togglePlanMode() },
             onSelectModel = { p, m, e -> applyModel(p, m, e) },

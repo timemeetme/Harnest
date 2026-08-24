@@ -37,6 +37,9 @@ export class ChatMessage {
   todosJson: string = '';
   /** assistant 消息：本轮响应耗时（毫秒，0=未记录） */
   durationMs: number = 0;
+  /** assistant 消息：回合 token 用量（内核 details.usage surfaced；0=未上报） */
+  inTok: number = 0;
+  outTok: number = 0;
   /** assistant 消息：执行轨迹 JSON（思考/工具/待办/转向/子代理，空串=无） */
   traceJson: string = '';
   /** k4：用户消息为 ⚡ 转向注入（下一 step 边界生效） */

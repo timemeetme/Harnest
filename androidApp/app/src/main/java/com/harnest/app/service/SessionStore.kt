@@ -22,6 +22,9 @@ data class StoredMessage(
     val traceJson: String? = null,
     val steered: Boolean = false, // k4：中途转向注入的消息（⚡ 标记）
     val rating: Int = 0, // k6：消息反馈 — 1=👍 -1=👎 0=未评（仅 assistant 有意义，本地持久）
+    val isError: Boolean = false, // 错误/兜底文案消息（红样式 + 重试入口，不入评分）
+    val inTok: Long = 0, // 回合 token 用量（内核 details.usage surfaced；0 = 未上报）
+    val outTok: Long = 0,
 ) {
     fun toJson(): JSONObject {
         val o = JSONObject()
@@ -36,6 +39,9 @@ data class StoredMessage(
         traceJson?.let { o.put("traceJson", it) }
         if (steered) o.put("steered", true)
         if (rating != 0) o.put("rating", rating)
+        if (isError) o.put("isError", true)
+        if (inTok > 0) o.put("inTok", inTok)
+        if (outTok > 0) o.put("outTok", outTok)
         return o
     }
 
@@ -55,6 +61,9 @@ data class StoredMessage(
             traceJson = if (o.has("traceJson")) o.optString("traceJson") else null,
             steered = o.optBoolean("steered", false),
             rating = o.optInt("rating", 0),
+            isError = o.optBoolean("isError", false),
+            inTok = o.optLong("inTok", 0L),
+            outTok = o.optLong("outTok", 0L),
         )
     }
 }

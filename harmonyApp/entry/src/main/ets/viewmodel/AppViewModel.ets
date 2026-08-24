@@ -305,9 +305,30 @@ export class AppViewModel {
       }
 
       // 4. assistant 回复（记录实际模型与执行轨迹）
-      const reply = outcome.text.length > 0 ? outcome.text : this.describeReason(outcome);
-      const assistantMsg = this.makeMessage(MessageRole.Assistant, reply, record.provider, record.model);
+      // 错误判定：reason.error / max-tokens 截断 / 空回复兜底 → isError（错误色 + 重试入口，不入评分）
+      let failed = false;
+      let reply = outcome.text;
+      const reason = outcome.reason;
+      if (reason !== undefined && reason !== null) {
+        if (reason.error !== undefined && reason.error !== null) {
+          failed = true;
+        }
+        if (reason.kind === 'max-tokens') {
+          failed = true;
+        }
+      }
+      if (reply.length === 0) {
+        reply = this.describeReason(outcome);
+        failed = true;
+      }
+      // token 用量 surfaced：内核 extractDetails 的 details.usage（无 = 0 不展示）
+      const usage = outcome.details !== undefined && outcome.details !== null ? outcome.details.usage : null;
+      const assistantMsg = this.makeMessage(MessageRole.Assistant, reply, record.provider, record.model, failed);
       assistantMsg.durationMs = Date.now() - roundStart;
+      if (usage !== null && usage !== undefined) {
+        assistantMsg.inTok = usage.inputTokens;
+        assistantMsg.outTok = usage.outputTokens;
+      }
       assistantMsg.traceJson = this.traceJson();
       this.appendMessage(assistantMsg);
 
@@ -464,6 +485,78 @@ export class AppViewModel {
       hilog.error(DOMAIN, TAG, 'answerQuestion failed: %{public}s', msg);
       this.state.toast = '回答提交失败';
     }
+  }
+
+  /** 会话手动重命名（标题不再只等 LLM 命名） */
+  renameSession(id: string, title: string): void {
+    const clean = title.trim();
+    if (clean.length === 0) {
+      return;
+    }
+    const record = this.store.get(id);
+    if (record === null) {
+      return;
+    }
+    record.title = clean;
+    this.store.upsert(record);
+    const sessions = this.state.sessions.slice();
+    for (let i = 0; i < sessions.length; i++) {
+      if (sessions[i].id === id) {
+        sessions[i] = this.toSessionUi(record);
+        break;
+      }
+    }
+    this.state.sessions = sessions;
+    this.state.toast = '已重命名';
+  }
+
+  /** 错误重试：重发该错误消息之前最近一条 user 消息（重新问一遍，历史保留）。 */
+  retryFromMessage(messageId: string): void {
+    if (this.state.isSending) {
+      return;
+    }
+    const idx = this.state.messages.findIndex((m: ChatMessage) => m.id === messageId);
+    if (idx < 0) {
+      return;
+    }
+    let text = '';
+    for (let i = idx - 1; i >= 0; i--) {
+      if (this.state.messages[i].role === MessageRole.User) {
+        text = this.state.messages[i].content;
+        break;
+      }
+    }
+    if (text.trim().length === 0) {
+      this.state.toast = '未找到可重试的提问';
+      return;
+    }
+    this.sendMessage(text);
+  }
+
+  /** k5 跳过提问：全空 selected 提交（等价"不选直接交卷"，内核按空答案继续）。 */
+  async skipPendingQuestion(): Promise<void> {
+    await this.answerPendingQuestion({});
+  }
+
+  /** 清空当前会话消息（保留会话壳与 provider 选择，重新开始）。 */
+  clearCurrentMessages(): void {
+    const sessionId = this.state.activeSessionId ?? '';
+    const record = this.store.get(sessionId);
+    if (record === null || record.messages.length === 0) {
+      return;
+    }
+    record.messages = [];
+    this.store.upsert(record);
+    this.state.messages = [];
+    const sessions = this.state.sessions.slice();
+    for (let i = 0; i < sessions.length; i++) {
+      if (sessions[i].id === sessionId) {
+        sessions[i].messageCount = 0;
+        break;
+      }
+    }
+    this.state.sessions = sessions;
+    this.state.toast = '已清空';
   }
 
   /** k7e 终止后台任务 */
@@ -1000,6 +1093,15 @@ export class AppViewModel {
     if (m.role === MessageRole.Assistant && m.traceJson.length > 0) {
       sm.traceJson = m.traceJson;
     }
+    if (m.role === MessageRole.Assistant && m.isError) {
+      sm.isError = 1;
+    }
+    if (m.role === MessageRole.Assistant && m.inTok > 0) {
+      sm.inTok = m.inTok;
+    }
+    if (m.role === MessageRole.Assistant && m.outTok > 0) {
+      sm.outTok = m.outTok;
+    }
     if (m.role === MessageRole.User && m.steered) {
       sm.steered = 1;
     }
@@ -1050,6 +1152,9 @@ export class AppViewModel {
       if (m.role === MessageRole.Assistant) {
         m.durationMs = sm.durationMs ?? 0;
         m.traceJson = sm.traceJson ?? '';
+        m.isError = (sm.isError ?? 0) === 1;
+        m.inTok = sm.inTok ?? 0;
+        m.outTok = sm.outTok ?? 0;
       }
       m.steered = (sm.steered ?? 0) === 1;
       m.rating = sm.rating ?? 0;

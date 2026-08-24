@@ -36,15 +36,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -138,11 +142,18 @@ fun ChatView(
     onFork: ((StoredMessage) -> Unit)? = null,
     onRate: ((StoredMessage, Int) -> Unit)? = null,
     onCopy: ((StoredMessage) -> Unit)? = null,
+    onRenameSession: ((String, String) -> Unit)? = null,
+    onRetry: ((StoredMessage) -> Unit)? = null,
+    onClearMessages: (() -> Unit)? = null,
+    onSkipQuestions: (() -> Unit)? = null,
     bgJobs: List<BgJobView> = emptyList(),
     onKillJob: ((String) -> Unit)? = null,
 ) {
     var drawerOpen by remember { mutableStateOf(false) }
     var pickerOpen by remember { mutableStateOf(false) }
+    // 重命名对话框状态：目标会话 + 编辑中文本
+    var renameTarget by remember { mutableStateOf<SessionRecord?>(null) }
+    var renameText by remember { mutableStateOf("") }
 
     Box(Modifier.fillMaxSize().background(harnessColors().background)) {
         Column(Modifier.fillMaxSize()) {
@@ -156,6 +167,8 @@ fun ChatView(
                 onOpenDrawer = { drawerOpen = true },
                 onNewSession,
                 onCompact = onCompactSession,
+                canClear = messages.isNotEmpty() && !isSending,
+                onClear = onClearMessages,
             )
             if (needsConfig) ConfigBanner(onGoSettings)
             if (!a11yEnabled) A11yBanner(onOpenAccessibility)
@@ -184,6 +197,7 @@ fun ChatView(
                 onFork = onFork,
                 onRate = onRate,
                 onCopy = onCopy,
+                onRetry = onRetry,
                 bgJobs = bgJobs,
                 onKillJob = onKillJob,
             )
@@ -194,6 +208,7 @@ fun ChatView(
                 QuestionCard(
                     questions = pendingQuestions,
                     onSubmit = onSubmitAnswers,
+                    onSkip = onSkipQuestions,
                 )
             }
 
@@ -240,7 +255,62 @@ fun ChatView(
                             drawerOpen = false
                         },
                         onDelete = onDeleteSession,
+                        onRename = { s ->
+                            renameTarget = s
+                            renameText = s.title
+                        },
                     )
+                }
+            }
+        }
+
+        // 重命名对话框：BasicTextField + 取消/确定（对齐 iOS alert 内嵌输入）
+        renameTarget?.let { target ->
+            val fieldColors = harnessColors()
+            Dialog(onDismissRequest = { renameTarget = null }) {
+                Column(
+                    Modifier
+                        .width(280.dp)
+                        .background(fieldColors.surfaceElevated, RoundedCornerShape(14.dp))
+                        .padding(16.dp),
+                ) {
+                    Text("重命名会话", color = fieldColors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(10.dp))
+                    BasicTextField(
+                        value = renameText,
+                        onValueChange = { renameText = it },
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(fieldColors.surface, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        textStyle = TextStyle(color = fieldColors.textPrimary, fontSize = 14.sp),
+                        cursorBrush = SolidColor(fieldColors.primary),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.End) {
+                        Text(
+                            "取消",
+                            color = fieldColors.textHint,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .clickable { renameTarget = null }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "确定",
+                            color = fieldColors.primary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .clickable {
+                                    onRenameSession?.invoke(target.id, renameText)
+                                    renameTarget = null
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
                 }
             }
         }
@@ -258,6 +328,8 @@ private fun ChatTopBar(
     onOpenDrawer: () -> Unit,
     onNewSession: () -> Unit,
     onCompact: () -> Unit,
+    canClear: Boolean = false,
+    onClear: (() -> Unit)? = null,
 ) {
     val c = harnessColors()
     Row(
@@ -316,6 +388,15 @@ private fun ChatTopBar(
                 contentAlignment = Alignment.Center,
             ) { NavText("🗜", 15.sp, c.textHint) }
         }
+        // 清空当前会话消息（保留会话壳重新开始）：有历史且非发送中才显示
+        if (canClear && onClear != null) {
+            Box(
+                Modifier
+                    .size(40.dp)
+                    .clickable(onClick = onClear),
+                contentAlignment = Alignment.Center,
+            ) { NavText("🗑", 14.sp, c.textHint) }
+        }
         Box(
             Modifier
                 .size(40.dp)
@@ -350,19 +431,32 @@ private fun MessageStream(
     onFork: ((StoredMessage) -> Unit)? = null,
     onRate: ((StoredMessage, Int) -> Unit)? = null,
     onCopy: ((StoredMessage) -> Unit)? = null,
+    onRetry: ((StoredMessage) -> Unit)? = null,
     bgJobs: List<BgJobView> = emptyList(),
     onKillJob: ((String) -> Unit)? = null,
 ) {
     val c = harnessColors()
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    // 贴底判定：可见最后一项 index ≥ 总数-3 视为贴底；贴底才自动跟随流式更新，离开后显示"回到底部"悬浮按钮
+    val nearBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            last >= info.totalItemsCount - 3
+        }
+    }
     // 会话切换/首次进入：直接跳到底部（无动画），不依赖消息数变化（两会话消息数可能相同）
     LaunchedEffect(activeSessionId, messages.size) {
         if (messages.isNotEmpty()) {
             listState.scrollToItem(messages.size - 1)
         }
     }
-    // 发送中内容增长（消息数/最后一条长度/实时条目）：平滑跟随到底
+    // 发送中内容增长（消息数/最后一条长度/实时条目）：贴底时平滑跟随到底
     LaunchedEffect(isSending, messages.size, messages.lastOrNull()?.content?.length, liveItems.size, liveItems.lastOrNull()) {
+        if (!nearBottom) {
+            return@LaunchedEffect
+        }
         if (isSending) {
             listState.animateScrollToItem(messages.size)
         } else if (messages.isNotEmpty()) {
@@ -397,7 +491,7 @@ private fun MessageStream(
                 items(messages, key = { it.id }) { m ->
                     when (m.role) {
                         "user" -> UserBubble(m)
-                        "assistant" -> AssistantBubble(m, onFork = onFork, onRate = onRate, onCopy = onCopy)
+                        "assistant" -> AssistantBubble(m, onFork = onFork, onRate = onRate, onCopy = onCopy, onRetry = onRetry)
                         "tool" -> ToolCard(m, elevatedBackground = false)
                     }
                 }
@@ -418,6 +512,31 @@ private fun MessageStream(
                     }
                 }
             }
+        }
+
+        // 离开底部后显示：一键回底继续跟随流式输出（对标 ChatGPT/Trae）
+        AnimatedVisibility(
+            visible = !nearBottom && messages.isNotEmpty(),
+            modifier = Modifier.align(Alignment.BottomCenter),
+        ) {
+            Text(
+                if (isSending) "⌄ 回到底部 · 跟随最新" else "⌄ 回到底部",
+                color = if (isSending) c.primary else c.textPrimary,
+                fontSize = 11.sp,
+                modifier = Modifier
+                    .padding(bottom = 10.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(c.surfaceElevated)
+                    .border(0.5.dp, c.divider, RoundedCornerShape(50))
+                    .clickable {
+                        scope.launch {
+                            if (messages.isNotEmpty()) {
+                                listState.animateScrollToItem(messages.size - 1)
+                            }
+                        }
+                    }
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            )
         }
     }
 }
@@ -453,25 +572,43 @@ private fun AssistantBubble(
     onFork: ((StoredMessage) -> Unit)? = null,
     onRate: ((StoredMessage, Int) -> Unit)? = null,
     onCopy: ((StoredMessage) -> Unit)? = null,
+    onRetry: ((StoredMessage) -> Unit)? = null,
 ) {
     val c = harnessColors()
+    // 错误消息：isError 字段（新数据）或 err_ 前缀（兼容旧数据/停止消息不带）
+    val isError = m.isError || m.id.startsWith("err_")
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
         Column(Modifier.widthIn(max = 320.dp)) {
             val meta = listOfNotNull(m.provider, m.model).joinToString(" · ")
-            if (meta.isNotEmpty() || m.durationMs > 0) {
+            if (meta.isNotEmpty() || m.durationMs > 0 || m.inTok > 0 || m.outTok > 0) {
                 Row(Modifier.padding(start = 4.dp, bottom = 3.dp)) {
                     if (meta.isNotEmpty()) {
                         Text(
                             meta,
-                            color = c.textHint,
+                            color = if (isError) c.error else c.textHint,
                             fontSize = 10.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier.weight(1f, fill = false),
                         )
                     }
+                    if (meta.isNotEmpty()) Spacer(Modifier.width(6.dp))
+                    if (isError) {
+                        Text("失败", color = c.error, fontSize = 10.sp, maxLines = 1)
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    // token 用量 + 速率（usage surfaced；tok/s = outTok / 时长秒）
+                    if (m.inTok > 0 || m.outTok > 0) {
+                        val tok = buildString {
+                            append("↑${fmtTok(m.inTok)} ↓${fmtTok(m.outTok)}")
+                            if (m.outTok > 0 && m.durationMs > 1000) {
+                                append(String.format(Locale.US, " · %.0f tok/s", m.outTok * 1000.0 / m.durationMs))
+                            }
+                        }
+                        Text(tok, color = c.textHint, fontSize = 10.sp, maxLines = 1)
+                        Spacer(Modifier.width(6.dp))
+                    }
                     if (m.durationMs > 0) {
-                        if (meta.isNotEmpty()) Spacer(Modifier.width(6.dp))
                         Text(
                             "⏱ " + fmtDuration(m.durationMs),
                             color = c.textHint,
@@ -495,9 +632,38 @@ private fun AssistantBubble(
                     .padding(12.dp),
             ) {
                 // k8 接线：Markdown 渲染（标题/粗斜/码块高亮/表格/链接/$数学$降级/@mention）
-                MarkdownBody(m.content, isError = m.id.startsWith("err_"))
+                MarkdownBody(m.content, isError = isError)
             }
-            if ((onRate != null || onFork != null || onCopy != null) && !m.id.startsWith("err_")) {
+            if (isError) {
+                // 错误消息操作行：🔄 重试（重发之前最近一条 user 消息）+ 📋 复制错误信息
+                if (onRetry != null || onCopy != null) {
+                    Row(Modifier.padding(start = 4.dp, top = 3.dp)) {
+                        if (onRetry != null) {
+                            Text(
+                                "🔄 重试",
+                                color = c.error,
+                                fontSize = 11.sp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .background(c.error.copy(alpha = 0.12f))
+                                    .clickable { onRetry(m) }
+                                    .padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                        if (onCopy != null) {
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                "📋",
+                                fontSize = 12.sp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(50))
+                                    .clickable { onCopy(m) }
+                                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                }
+            } else if (onRate != null || onFork != null || onCopy != null || onRetry != null) {
                 // emoji 是彩色字形，Text color 着不了色；选中态用 primary 半透明药丸底做视觉反馈
                 Row(Modifier.padding(start = 4.dp, top = 3.dp)) {
                     if (onRate != null) {
@@ -524,6 +690,18 @@ private fun AssistantBubble(
                                     else Color.Transparent
                                 )
                                 .clickable { onRate(m, -1) }
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                    // 重新生成：重发该轮之前最近一条 user 消息（对齐 iOS/Harmony 🔄）
+                    if (onRetry != null) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "🔄",
+                            fontSize = 12.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable { onRetry(m) }
                                 .padding(horizontal = 6.dp, vertical = 2.dp),
                         )
                     }
@@ -554,6 +732,10 @@ private fun AssistantBubble(
         }
     }
 }
+
+/** token 数格式化：≥1000 显示 x.xk。 */
+private fun fmtTok(n: Long): String =
+    if (n >= 1000) String.format(Locale.US, "%.1fk", n / 1000.0) else n.toString()
 
 /** Tool status → left edge color (running=warning, error=error, ok=neutral). */
 private fun toolStatusColor(status: String?): Color {
@@ -1032,6 +1214,7 @@ private fun SessionsDrawer(
     onNewSession: () -> Unit,
     onSelect: (String) -> Unit,
     onDelete: (String) -> Unit,
+    onRename: ((SessionRecord) -> Unit)? = null,
 ) {
     val c = harnessColors()
     val fmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
@@ -1072,6 +1255,16 @@ private fun SessionsDrawer(
                         if (current) {
                             Text("●", color = c.success, fontSize = 10.sp)
                             Spacer(Modifier.width(4.dp))
+                        }
+                        if (onRename != null) {
+                            Text(
+                                "✎",
+                                color = c.textHint,
+                                fontSize = 13.sp,
+                                modifier = Modifier
+                                    .clickable { onRename(s) }
+                                    .padding(start = 8.dp),
+                            )
                         }
                         if (sessions.size > 1) {
                             Text(
@@ -1713,6 +1906,7 @@ private fun PulseDot(color: Color, size: androidx.compose.ui.unit.Dp = 7.dp) {
 private fun QuestionCard(
     questions: List<PendingQuestion>,
     onSubmit: (List<PendingAnswer>) -> Unit,
+    onSkip: (() -> Unit)? = null,
 ) {
     val c = harnessColors()
     val isPlanReview = questions.firstOrNull()?.intentKind == "plan-review"
@@ -1749,30 +1943,46 @@ private fun QuestionCard(
                 || customs.getValue(q.id).value.isNotBlank()
                 || q.options.isEmpty()
         }
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(40.dp)
-                .background(if (allAnswered) c.primary else c.divider, RoundedCornerShape(10.dp))
-                .clickable(enabled = allAnswered) {
-                    onSubmit(
-                        questions.map { q ->
-                            PendingAnswer(
-                                q.id,
-                                selections.getValue(q.id).value.toList(),
-                                customs.getValue(q.id).value.trim(),
-                            )
-                        }
-                    )
-                },
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                if (isPlanReview) "提交决定" else "提交回答",
-                color = c.onPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .weight(1f)
+                    .height(40.dp)
+                    .background(if (allAnswered) c.primary else c.divider, RoundedCornerShape(10.dp))
+                    .clickable(enabled = allAnswered) {
+                        onSubmit(
+                            questions.map { q ->
+                                PendingAnswer(
+                                    q.id,
+                                    selections.getValue(q.id).value.toList(),
+                                    customs.getValue(q.id).value.trim(),
+                                )
+                            }
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    if (isPlanReview) "提交决定" else "提交回答",
+                    color = c.onPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+            // 跳过：每题提交空答案，内核按空继续（不想答也能推进回合）
+            if (onSkip != null) {
+                Spacer(Modifier.width(8.dp))
+                Box(
+                    Modifier
+                        .height(40.dp)
+                        .background(c.surface, RoundedCornerShape(10.dp))
+                        .clickable(onClick = onSkip)
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("跳过", color = c.textHint, fontSize = 13.sp)
+                }
+            }
         }
     }
 }

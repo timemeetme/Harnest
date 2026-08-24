@@ -16,6 +16,11 @@ struct StoredMessage: Identifiable, Equatable {
     var traceJson: String?
     var steered: Bool
     var rating: Int
+    /// 错误/兜底文案消息（红色样式 + 重试入口，不入评分）
+    var isError: Bool
+    /// 回合 token 用量（内核 details.usage surfaced；0 = 未上报）
+    var inTok: Int64
+    var outTok: Int64
 
     init(
         id: String,
@@ -31,7 +36,10 @@ struct StoredMessage: Identifiable, Equatable {
         durationMs: Int64 = 0,
         traceJson: String? = nil,
         steered: Bool = false,
-        rating: Int = 0
+        rating: Int = 0,
+        isError: Bool = false,
+        inTok: Int64 = 0,
+        outTok: Int64 = 0
     ) {
         self.id = id
         self.role = role
@@ -47,6 +55,9 @@ struct StoredMessage: Identifiable, Equatable {
         self.traceJson = traceJson
         self.steered = steered
         self.rating = rating
+        self.isError = isError
+        self.inTok = inTok
+        self.outTok = outTok
     }
 
     var dict: [String: Any] {
@@ -63,6 +74,9 @@ struct StoredMessage: Identifiable, Equatable {
         if let v = traceJson { o["traceJson"] = v }
         if steered { o["steered"] = true }
         if rating != 0 { o["rating"] = rating }
+        if isError { o["isError"] = true }
+        if inTok > 0 { o["inTok"] = inTok }
+        if outTok > 0 { o["outTok"] = outTok }
         return o
     }
 
@@ -81,7 +95,10 @@ struct StoredMessage: Identifiable, Equatable {
             durationMs: (o["durationMs"] as? NSNumber)?.int64Value ?? 0,
             traceJson: o["traceJson"] as? String,
             steered: (o["steered"] as? NSNumber)?.boolValue ?? false,
-            rating: (o["rating"] as? NSNumber)?.intValue ?? 0
+            rating: (o["rating"] as? NSNumber)?.intValue ?? 0,
+            isError: (o["isError"] as? NSNumber)?.boolValue ?? false,
+            inTok: (o["inTok"] as? NSNumber)?.int64Value ?? 0,
+            outTok: (o["outTok"] as? NSNumber)?.int64Value ?? 0
         )
     }
 }

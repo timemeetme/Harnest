@@ -26,6 +26,11 @@ export interface StoredMessage {
   durationMs?: number;
   /** assistant 消息：执行轨迹 JSON（思考/工具/待办，空=无） */
   traceJson?: string;
+  /** 错误/兜底文案消息（1=是；缺省=否 — 旧数据兼容） */
+  isError?: number;
+  /** assistant 消息：回合 token 用量（缺省=0 — 旧数据兼容） */
+  inTok?: number;
+  outTok?: number;
   /** k4：用户消息为 ⚡ 转向注入（1=是；缺省/0=否 — 旧数据兼容） */
   steered?: number;
   /** k6：消息评分 1 赞 / -1 踩 / 0 无（缺省=0 — 旧数据兼容） */

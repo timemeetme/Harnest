@@ -732,6 +732,8 @@ private struct CodeBlockView: View {
     let lang: String
     let code: String
 
+    @State private var copied = false
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: true) {
             MdHighlight.highlight(code, lang: lang)
@@ -742,13 +744,32 @@ private struct CodeBlockView: View {
         }
         .background(Theme.surface, in: RoundedRectangle(cornerRadius: 8))
         .overlay(alignment: .topTrailing) {
-            if !lang.isEmpty {
-                Text(lang)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(Theme.textHint)
-                    .padding(.top, 6)
-                    .padding(.trailing, 10)
+            HStack(spacing: 6) {
+                Button {
+                    UIPasteboard.general.string = code
+                    withAnimation(.easeOut(duration: 0.15)) { copied = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        withAnimation(.easeOut(duration: 0.3)) { copied = false }
+                    }
+                } label: {
+                    Text(copied ? "已复制" : "复制")
+                        .font(.system(size: 10))
+                        .foregroundStyle(copied ? Theme.accent : Theme.textHint)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Theme.surfaceElevated.opacity(0.9))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("复制代码")
+                if !lang.isEmpty {
+                    Text(lang)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundColor(Theme.textHint)
+                }
             }
+            .padding(.top, 6)
+            .padding(.trailing, 10)
         }
     }
 }

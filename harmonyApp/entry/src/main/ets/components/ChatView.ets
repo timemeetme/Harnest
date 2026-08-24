@@ -35,7 +35,12 @@ export struct ChatView {
   @State qSel: Record<string, string[]> = {};
   /** k5 提问卡自由文本（questionId → 输入） */
   @State qCustom: Record<string, string> = {};
+  /** 会话抽屉行内重命名（非空 id = 正在编辑该会话标题） */
+  @State renameId: string | null = null;
+  @State renameText: string = '';
   private scroller: Scroller = new Scroller();
+  /** 滚动位置追踪：距底部 ≤2 项视为"贴底"，贴底才自动跟随流式更新；离开后显示"回到底部"悬浮按钮。 */
+  @State nearBottom: boolean = true;
   /** 上次会话 id：检测会话切换，切换时延迟跳底（等列表重建完） */
   private lastSessionId: string | null = null;
 
@@ -43,10 +48,13 @@ export struct ChatView {
     const sid = this.state.activeSessionId;
     if (sid !== this.lastSessionId) {
       this.lastSessionId = sid;
+      this.nearBottom = true;
       this.scrollToBottomDelayed(180);
       return;
     }
-    this.scroller.scrollEdge(Edge.Bottom);
+    if (this.nearBottom) {
+      this.scroller.scrollEdge(Edge.Bottom);
+    }
   }
 
   aboutToAppear(): void {
@@ -84,6 +92,22 @@ export struct ChatView {
           this.inputArea()
         }
         .width('100%').height('100%')
+
+        // 离开底部后显示：一键回底继续跟随流式输出（对标 ChatGPT/Trae）
+        if (!this.nearBottom && this.state.messages.length > 0) {
+          Text(this.state.isSending ? '⌄ 回到底部 · 跟随最新' : '⌄ 回到底部')
+            .fontSize('11fp')
+            .fontColor(this.state.isSending ? this.theme.primary : this.theme.textPrimary)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .borderRadius(14)
+            .backgroundColor(this.theme.surfaceElevated)
+            .border({ width: 0.5, color: this.theme.divider })
+            .margin({ bottom: 96 })
+            .onClick(() => {
+              this.nearBottom = true;
+              this.scroller.scrollEdge(Edge.Bottom);
+            })
+        }
       }
       .layoutWeight(1)
       .width('100%')
@@ -146,6 +170,15 @@ export struct ChatView {
         .padding({ left: 6, right: 6, top: 8, bottom: 8 })
         .onClick(() => {
           this.viewModel.togglePlan();
+        })
+
+      // 清空当前会话消息（回合空闲且有消息时可用；保留会话壳与模型选择）
+      Text('🗑').fontSize('15fp')
+        .fontColor(!this.state.isSending && this.state.messages.length > 0
+          ? this.theme.textPrimary : this.theme.textHint)
+        .padding({ left: 6, right: 6, top: 8, bottom: 8 })
+        .onClick(() => {
+          this.viewModel.clearCurrentMessages();
         })
 
       Text('＋').fontSize('20fp')
@@ -222,6 +255,16 @@ export struct ChatView {
       .width('100%')
       .padding({ left: 12, right: 12, top: 12 })
       .scrollBar(BarState.Off)
+      .onScrollIndex((_first: number, last: number) => {
+        let total = this.state.messages.length;
+        if (this.state.isSending && this.state.liveItems.length > 0) {
+          total++;
+        }
+        if (this.state.bgJobs.length > 0) {
+          total++;
+        }
+        this.nearBottom = last >= total - 2;
+      })
     }
   }
 
@@ -236,6 +279,24 @@ export struct ChatView {
     }
     const m = Math.floor(s / 60);
     return m + '分' + Math.round(s % 60) + '秒';
+  }
+
+  /** token 用量格式化：↑1.2k ↓3.4k · 12 tok/s（outTok/durationMs 换算） */
+  private fmtUsage(m: ChatMessage): string {
+    let s = '↑' + this.fmtTok(m.inTok) + ' ↓' + this.fmtTok(m.outTok);
+    if (m.outTok > 0 && m.durationMs > 1000) {
+      const tps = m.outTok * 1000 / m.durationMs;
+      s += ' · ' + tps.toFixed(0) + ' tok/s';
+    }
+    return s;
+  }
+
+  /** token 数格式化：1234 → 1.2k */
+  private fmtTok(n: number): string {
+    if (n >= 1000) {
+      return (n / 1000).toFixed(1) + 'k';
+    }
+    return n.toString();
   }
 
   @Builder
@@ -264,8 +325,12 @@ export struct ChatView {
           this.liveActivityPanel(parseTrace(m.traceJson), false, m.id)
         }
         Column({ space: 4 }) {
-          if ((m.model !== null && m.model !== undefined && m.model.length > 0) || m.durationMs > 0) {
+          if ((m.model !== null && m.model !== undefined && m.model.length > 0) || m.durationMs > 0
+            || m.inTok > 0 || m.outTok > 0) {
             Row({ space: 6 }) {
+              if (m.isError) {
+                Text('⚠ 失败').fontSize('10fp').fontColor(this.theme.error)
+              }
               if (m.model !== null && m.model !== undefined && m.model.length > 0) {
                 Text(this.viewModel.providerLabel(m.provider ?? '') + ' · ' + m.model)
                   .fontSize('10fp')
@@ -278,6 +343,11 @@ export struct ChatView {
                 Text('⏱ ' + this.fmtDuration(m.durationMs))
                   .fontSize('10fp')
                   .fontColor(m.isError ? this.theme.error : this.theme.textHint)
+              }
+              if (m.inTok > 0 || m.outTok > 0) {
+                Text(this.fmtUsage(m))
+                  .fontSize('10fp')
+                  .fontColor(this.theme.textHint)
               }
             }
           }
@@ -293,8 +363,26 @@ export struct ChatView {
         .borderRadius(12)
         .backgroundColor(this.theme.assistantBubble)
 
-        // k6 消息尾部操作：评分 / 复制 / fork（错误消息不显示）
-        if (!m.isError) {
+        // k6 消息尾部操作：正常消息评分/复制/fork；错误消息 🔄重试 + 📋复制
+        if (m.isError) {
+          Row({ space: 4 }) {
+            Text('🔄 重试').fontSize('11fp')
+              .fontColor(this.theme.error)
+              .padding({ left: 8, right: 8, top: 4, bottom: 4 })
+              .borderRadius(10)
+              .backgroundColor(this.theme.surfaceElevated)
+              .border({ width: 0.5, color: this.theme.error })
+              .onClick(() => {
+                this.viewModel.retryFromMessage(m.id);
+              })
+            Text('📋').fontSize('12fp')
+              .padding(4)
+              .onClick(() => {
+                this.copyText(m.content);
+              })
+          }
+          .padding({ left: 4 })
+        } else {
           Row({ space: 4 }) {
             Text(m.rating === 1 ? '👍' : '👍🏻').fontSize('12fp')
               .padding(4)
@@ -305,6 +393,11 @@ export struct ChatView {
               .padding(4)
               .onClick(() => {
                 this.viewModel.setRating(m.id, -1);
+              })
+            Text('🔄').fontSize('12fp')
+              .padding(4)
+              .onClick(() => {
+                this.viewModel.retryFromMessage(m.id);
               })
             Text('📋').fontSize('12fp')
               .padding(4)
@@ -620,18 +713,50 @@ export struct ChatView {
             ListItem() {
               Column({ space: 3 }) {
                 Row() {
-                  Text(s.title).fontSize('14fp')
-                    .fontColor(s.id === this.state.activeSessionId
-                      ? this.theme.primary : this.theme.textPrimary)
-                    .maxLines(1)
-                    .textOverflow({ overflow: TextOverflow.Ellipsis })
-                    .layoutWeight(1)
-                  Text('✕').fontSize('12fp').fontColor(this.theme.textHint)
-                    .padding(6)
-                    .onClick(() => {
-                      this.viewModel.deleteSession(s.id);
-                    })
+                  if (this.renameId === s.id) {
+                    TextInput({ text: this.renameText, placeholder: '会话名称…' })
+                      .fontSize('13fp')
+                      .fontColor(this.theme.textPrimary)
+                      .placeholderColor(this.theme.textHint)
+                      .backgroundColor(this.theme.surfaceElevated)
+                      .borderRadius(8)
+                      .height(32)
+                      .layoutWeight(1)
+                      .onChange((v: string) => {
+                        this.renameText = v;
+                      })
+                    Text('✓').fontSize('14fp').fontColor(this.theme.primary)
+                      .padding({ left: 6, right: 2, top: 6, bottom: 6 })
+                      .onClick(() => {
+                        this.viewModel.renameSession(s.id, this.renameText);
+                        this.renameId = null;
+                      })
+                    Text('✕').fontSize('12fp').fontColor(this.theme.textHint)
+                      .padding({ left: 2, right: 2, top: 6, bottom: 6 })
+                      .onClick(() => {
+                        this.renameId = null;
+                      })
+                  } else {
+                    Text(s.title).fontSize('14fp')
+                      .fontColor(s.id === this.state.activeSessionId
+                        ? this.theme.primary : this.theme.textPrimary)
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                      .layoutWeight(1)
+                    Text('✎').fontSize('12fp').fontColor(this.theme.textHint)
+                      .padding(6)
+                      .onClick(() => {
+                        this.renameId = s.id;
+                        this.renameText = s.title;
+                      })
+                    Text('✕').fontSize('12fp').fontColor(this.theme.textHint)
+                      .padding({ left: 2, right: 6, top: 6, bottom: 6 })
+                      .onClick(() => {
+                        this.viewModel.deleteSession(s.id);
+                      })
+                  }
                 }
+                .width('100%')
                 Text(this.viewModel.providerLabel(s.provider) + ' · ' + s.model
                   + ' · ' + this.timeText(s.updatedAt))
                   .fontSize('10fp').fontColor(this.theme.textHint)
@@ -936,16 +1061,29 @@ export struct ChatView {
         .padding({ top: 4, bottom: 4 })
       }, (q: PendingQuestionItem) => 'pq_' + q.id)
 
-      Button('提交回答')
-        .fontSize('13fp')
-        .fontColor(this.theme.primaryOn)
-        .backgroundColor(this.theme.primary)
-        .borderRadius(8)
-        .height(36)
-        .width('100%')
-        .onClick(() => {
-          this.submitAnswers();
-        })
+      Row({ space: 8 }) {
+        Button('跳过')
+          .fontSize('13fp')
+          .fontColor(this.theme.textSecondary)
+          .backgroundColor(this.theme.surface)
+          .borderRadius(8)
+          .height(36)
+          .layoutWeight(1)
+          .onClick(() => {
+            this.viewModel.skipPendingQuestion();
+          })
+        Button('提交回答')
+          .fontSize('13fp')
+          .fontColor(this.theme.primaryOn)
+          .backgroundColor(this.theme.primary)
+          .borderRadius(8)
+          .height(36)
+          .layoutWeight(1)
+          .onClick(() => {
+            this.submitAnswers();
+          })
+      }
+      .width('100%')
     }
     .width('100%')
     .padding(12)
@@ -1142,6 +1280,10 @@ export struct ChatView {
                   this.toolLiveRow(group[0], panelKey + '_tl' + idx)
                 } else if (group[0].kind === 'answer') {
                   this.answerLiveBlock(group, isSending, panelKey + '_ab' + idx)
+                } else if (group[0].kind === 'steer') {
+                  this.steerLiveRow(group[0], panelKey + '_st' + idx)
+                } else if (group[0].kind === 'subagent') {
+                  this.subagentLiveRow(group[0], panelKey + '_sa' + idx)
                 } else {
                   this.todosLiveBlock(group[0], panelKey + '_td' + idx)
                 }
@@ -1383,6 +1525,109 @@ export struct ChatView {
     .onClick(() => {
       this.toggleLive(key, false);
     })
+  }
+
+  /** k4 转向条目：⚡ 橙色高亮行，点击展开注入全文（下一 step 边界生效）。 */
+  @Builder
+  steerLiveRow(item: LiveItem, key: string) {
+    Row() {
+      Row()
+        .width(3)
+        .height(16)
+        .borderRadius(1)
+        .backgroundColor(this.theme.warning)
+        .margin({ right: 8 })
+      Text('⚡').fontSize('11fp')
+      Text('中途转向')
+        .fontSize('12fp')
+        .fontColor(this.theme.warning)
+        .fontWeight(FontWeight.Medium)
+        .margin({ left: 6 })
+      Text(this.isLiveOpen(key, false) ? (item.text.length > 400 ? '…' + item.text.substring(item.text.length - 400) : item.text) : item.text)
+        .fontSize('11fp')
+        .fontColor(this.theme.textHint)
+        .maxLines(this.isLiveOpen(key, false) ? 6 : 1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .layoutWeight(1)
+        .margin({ left: 6 })
+      Text(this.isLiveOpen(key, false) ? '▾' : '▸')
+        .fontSize('10fp')
+        .fontColor(this.theme.textHint)
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+    .padding({ top: 4, bottom: 4 })
+    .onClick(() => {
+      this.toggleLive(key, false);
+    })
+  }
+
+  /** k7 子代理/workflow 树节点：缩进边条 + 🤖 标签 + 阶段 + 运行中脉冲点 / 完成态 outcome。 */
+  @Builder
+  subagentLiveRow(item: LiveItem, key: string) {
+    Row() {
+      Row()
+        .width(3)
+        .height(16)
+        .borderRadius(1)
+        .backgroundColor(this.subagentStatusColor(item))
+        .margin({ right: 8 })
+      Text('🤖').fontSize('11fp')
+      Text(item.name)
+        .fontSize('12fp')
+        .fontColor(this.theme.textPrimary)
+        .fontWeight(FontWeight.Medium)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .margin({ left: 6 })
+      if (item.status !== 'done' && item.status !== 'error') {
+        Text(item.status)
+          .fontSize('10fp')
+          .fontColor(this.theme.textHint)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ left: 6 })
+          .flexShrink(1)
+      }
+      Blank()
+      if (item.result.length === 0) {
+        Text('●').fontSize('8fp').fontColor(this.theme.warning).margin({ left: 4 })
+        Text('运行中').fontSize('10fp').fontColor(this.theme.warning)
+      } else {
+        Text(this.subagentOutcomeText(item))
+          .fontSize('10fp')
+          .fontColor(this.subagentStatusColor(item))
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ left: 6 })
+          .constraintSize({ maxWidth: '40%' })
+      }
+    }
+    .width('100%')
+    .alignItems(VerticalAlign.Center)
+    .padding({ left: 8, right: 2, top: 4, bottom: 4 })
+    .onClick(() => {
+      this.toggleLive(key, false);
+    })
+  }
+
+  /** 子代理状态色：运行中=warning / 失败=error / 完成=success。 */
+  private subagentStatusColor(item: LiveItem): string {
+    if (item.result.length === 0) {
+      return this.theme.warning;
+    }
+    const o = item.result.toLowerCase();
+    if (o.indexOf('error') >= 0 || o.indexOf('fail') >= 0) {
+      return this.theme.error;
+    }
+    return this.theme.success;
+  }
+
+  private subagentOutcomeText(item: LiveItem): string {
+    if (item.result.trim().length === 0) {
+      return '完成';
+    }
+    return item.result.length > 60 ? item.result.substring(0, 60) : item.result;
   }
 
   /** 待办快照（一级折叠）：标题显示进度 done/total，展开为状态图标列表。 */
