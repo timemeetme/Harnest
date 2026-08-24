@@ -800,14 +800,26 @@ struct LiveActivityPanel: View {
                 .buttonStyle(.plain)
 
                 if expanded {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(items) { item in
-                            LiveItemRow(item: item)
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(items) { item in
+                                    LiveItemRow(item: item)
+                                        .id(item.id)
+                                }
+                                Color.clear.frame(height: 1).id("liveBottom")
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 10)
+                        }
+                        .frame(maxHeight: 280)
+                        .transition(.opacity)
+                        .onChange(of: thinkChars) { _, _ in
+                            withAnimation(.easeOut(duration: 0.15)) {
+                                proxy.scrollTo("liveBottom", anchor: .bottom)
+                            }
                         }
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 10)
-                    .transition(.opacity)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
