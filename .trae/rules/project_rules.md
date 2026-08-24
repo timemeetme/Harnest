@@ -3,7 +3,7 @@
 > 本文件是 TRAE 项目记忆：每次会话自动加载，新会话开工前先读这里，避免重复踩坑。
 > 由 TRAE 生成并按项目进展自动维护：每次会话发生实质变更（新提交/新结论/新陷阱）时由当前会话直接更新。人工修改请同步更新「维护日志」。
 >
-> 最后同步 HEAD: f36ae0b4e2 （2026-08-25，Mac 机：万字思考卡死 + details null 致 iOS 崩溃双修复，见陷阱 17/18；前一基线 23130e84fa 为真机构建弃用警告清零）
+> 最后同步 HEAD: 214532ffd3 （2026-08-25，Windows 机：鸿蒙 ArkTS 编译错误修复 + 真机 6HR0226328004267 构建装机运行，见陷阱 19；前一基线 f36ae0b4e2 为 Mac 万字思考卡死 + NSNull 崩溃双修复，陷阱 17/18）
 
 ## 项目身份
 
@@ -79,7 +79,22 @@ cd androidApp; .\gradlew.bat :app:compileDebugKotlin --offline
 gh run list --limit 3
 gh run view <run-id> --log-failed | Select-String 'error:' | Sort-Object -Unique   # 抓编译错误清单
 
-# Harmony/真机：hdc（Harmony 设备）在 PATH；装机用 HarmonyOS Studio 侧的 DevEco 工具链
+# Harmony 本地构建 + 真机装机（2026-08-25 验证，node v24；hdc/adb 都不在 PATH，用绝对路径）
+# 构建（首次需先 npm install——devDeps 是 file: 指向 DevEco Studio 内置包，会生成 package-lock.json，勿提交）：
+cd d:\Projects\HarnessApp\harmonyApp
+npm install
+$env:DEVECO_SDK_HOME = "C:\Program Files\Huawei\DevEco Studio\sdk"
+$env:PATH = "C:\Program Files\Huawei\DevEco Studio\tools\node;" + $env:PATH
+.\hvigorw.bat --mode module -p module=entry@default assembleHap --no-daemon
+# 产物：entry\build\default\outputs\default\entry-default-signed.hap（~8.2MB）
+# 本地调试签名走 build-profile.json5 指向 C:\Users\heave\.ohos\config\ 的 DevEco 自动签名证书（CI 没有的能力）
+# hdc 真机操作（设备 6HR0226328004267）：
+$hdc = "C:\Program Files\Huawei\DevEco Studio\sdk\default\openharmony\toolchains\hdc.exe"
+& $hdc list targets
+& $hdc -t 6HR0226328004267 install -r .\entry\build\default\outputs\default\entry-default-signed.hap
+& $hdc -t 6HR0226328004267 shell aa start -a EntryAbility -b com.harnest.app      # 锁屏时会失败(Error 10106102)，需人工解锁
+& $hdc -t 6HR0226328004267 shell aa force-stop com.harnest.app
+& $hdc -t 6HR0226328004267 shell "ps -ef | grep harnest | grep -v grep"            # 进程存活验证
 
 # transpiler 重新打包 harness.js 并分发三端（2026-08-24 验证，node v24）
 cd tools\harness-transpiler; node build.mjs; node patch.mjs   # 产物 output\harness.js；esbuild 把中文转 \uXXXX 转义，grep 中文搜不到是正常的
@@ -133,6 +148,7 @@ Copy-Item tools\harness-transpiler\output\harness.js harmonyApp\entry\src\main\r
     - 内核 TS 显式 `null` 字段经 JSON.stringify 保留 → Swift 解析为 **NSNull 实例（非 nil）**：能过 `guard let any`，过不了 `as? String`，最后被当对象序列化 → 崩。触发源：extractDetails 纯对话回合 `todos/usage: null`
     - 内核侧治本：局部变量用 `undefined` 初始化（`JSON.stringify` 自动**省略** undefined 值的字段，null 则原样输出）；宿主侧兜底：encodeString 加 `if any is NSNull { return nil }` + isValidJSONObject 前置。跨端传 JSON 时**用 undefined 不用 null**，宿主解析统一按"缺 key"处理
 18. **节流相位锁死**：宿主 UI 节流窗口与内核心跳间隔**同频**（均 200ms）时，事件到达抖动可能让每条事件都落进 pending、整轮不刷新。宿主窗口必须**严格小于**内核心跳（本例 150ms < 200ms），且回合收尾（finishRound/序列化前）必须 flush 暂存数据补偿丢帧
+19. **Harmony CI 不拦截 ArkTS 编译错误**（214532ffd3 修复，2026-08-25 Windows）：build-harmony.yml 的 assembleHap 步骤带 `continue-on-error: true`（ubuntu runner 无签名证书，打包 best-effort），**ArkTS 编译错误永远不会让 CI 变红**——推送前鸿蒙代码必须在 Windows 本地跑 hvigorw 构建（唯一门禁，与陷阱 10「iOS 首次真实编译暴雷」同构）。实证：Mac 推的模型/思考选择器引用了 UiState 上不存在的 `state.currentSession`（4 处 ERROR 含 `arkts-no-any-unknown`），CI 仍全绿。另注意：UiState 派生属性别凭空引用，在 AppViewModel 加辅助方法（`currentSession(): SessionUi | null` 按 activeSessionId 查 sessions）；`harmonyApp/package-lock.json` **不可提交**（resolved 锁定本机 `file:C:/Program Files/...` 绝对路径，入库破坏 CI）
 
 ## 环境事实
 
@@ -152,7 +168,8 @@ Copy-Item tools\harness-transpiler\output\harness.js harmonyApp\entry\src\main\r
 - ✅ `:shared:iosSimulatorArm64Test` 通过；XCFramework 51MB（ios-arm64 + ios-arm64_x86_64-simulator 双 slice）
 - ✅ Windows `:app:compileDebugKotlin --offline` 通过（8c78bd6e89 时点复验，4s——maxTokens 配置链改动后）
 - ✅ Windows transpiler 打包链路（8c78bd6e89 复验）：build.mjs + patch.mjs + check-quickjs-compat PASS + 三端分发 SHA256 一致（1BEB4F94…）
-- ⬜ 未验证：kernel.sh/kernel.ps1 内核子模块管理命令；真机回归 NO_ADAPTER 修复（清空 deepseek key 后重开旧会话应回落默认 provider 不报错）；真机回归 max-tokens 修复（deepseek-reasoner 问难题应完整出答案不截断）；真机验证 maxTokens 用户配置生效（设置页填 1024 问长答案应截断、填 65536 应完整）；**真机回归万字思考（deepseek-reasoner 问难题：思考过程应流畅刷新不卡死、回合结束不崩溃）**；Android/Harmony 端 f36ae0b4e2 编译验证（靠 CI）
+- ✅ **鸿蒙本地构建 + 真机装机**（2026-08-25，214532ffd3）：hvigorw assembleHap BUILD SUCCESSFUL（~10s）+ 本地调试证书 SignHap + hdc install -r + aa start，真机 6HR0226328004267 进程存活（含 f36ae0b4e2 合流后代码）；构建中修复 4 处 ArkTS ERROR（见陷阱 19）
+- ⬜ 未验证：kernel.sh/kernel.ps1 内核子模块管理命令；真机回归 NO_ADAPTER 修复（清空 deepseek key 后重开旧会话应回落默认 provider 不报错）；真机回归 max-tokens 修复（deepseek-reasoner 问难题应完整出答案不截断）；真机验证 maxTokens 用户配置生效（设置页填 1024 问长答案应截断、填 65536 应完整）；**真机回归万字思考（deepseek-reasoner 问难题：思考过程应流畅刷新不卡死、回合结束不崩溃）**；Android 端 f36ae0b4e2/214532ffd3 编译验证（靠 CI）
 
 ## CI 修复史（8 轮迭代，2026-08-22，Windows 端）
 
@@ -191,3 +208,4 @@ Mac 端后续（2026-08-23）：c5d5d82e71（ConfigService 缓存回写值语义
 - 2026-08-24 Mac 端 Xcode 27 beta 适配（2922a9650a）：清零 IDE 31 issue（编译口径 34 处告警）——四类 Swift 6 并发诊断（noasync 锁 ×23 / @Sendable 捕获 / MainActor 隔离 / unused 结果，见陷阱 15），涉及 LocalEngine/HarnessEngine/HttpBridge/DeviceBridge 共 4 文件 8 处编辑（全部串行，陷阱 13 防护生效）；环境变更：Mac 升级 macOS 27 + Xcode-beta.app 27A5237l 成为唯一 Xcode（xcode-select 指向 CommandLineTools 需 DEVELOPER_DIR）；clean build 0 警告 + XCTest 14/14 复验通过
 - 2026-08-25 Mac 端真机适配（23130e84fa）：清零真机构建 12 处 API 弃用警告（见陷阱 16）——部署目标 16.0→17.0 + onChange/EKEventStore/UIScreen.main 新 API + orientations 补全，涉及 project.yml/Info.plist/ChatView/DeviceBridge 共 4 文件；真机 MyPhone (iPhone 17 Pro/iOS 27 beta) 已连接；真机 clean build（CODE_SIGNING_ALLOWED=NO）0 警告 + XCTest 14/14 通过
 - 2026-08-25 Mac 端双修复（f36ae0b4e2）：①万字思考卡死（内核 emit 阈值 16字/60ms→64字/200ms + iOS 150ms 节流/flushPendingThink 收尾补偿 + 渲染尾部 4000 字封顶 + 日志 240 字截断）；②NSJSONSerialization 顶层 NSNull 崩溃（内核 extractDetails undefined 化剥离 null 字段 + iOS encodeString NSNull 守卫/isValidJSONObject 前置，见陷阱 17/18——try? 接不住 ObjC 异常已实证）。会话中断恢复后按陷阱 13 diff 核对九处编辑全部存活；transpiler 打包 + QuickJS 门禁 PASS + 三端分发 SHA256 一致（dfe359c7）+ 模拟器构建 + XCTest 14/14（**模拟器 runtime 更新 OS 26.5，iPhone 17 Pro 没了改用 iPhone 17e**）；Mac 首次本地验证 transpiler 打包链路
+- 2026-08-25 Windows 端鸿蒙装机（214532ffd3）：拉取 Mac 12 提交后本地构建 HAP 首次暴露 4 处 ArkTS ERROR（ChatView 引用 UiState 不存在的 state.currentSession，CI best-effort 全绿没拦，见陷阱 19）→ AppViewModel 加 currentSession() 辅助方法修复；本地调试证书 SignHap + hdc install -r + aa start，真机 6HR0226328004267 运行存活；期间 Mac 并行推 f36ae0b4e2 → pull --rebase 合流后重新构建重装（新 PID 4819）；沉淀 Windows 鸿蒙构建装机命令段 + 环境事实（锁屏时 aa start 报 10106102 需人工解锁；package-lock.json 勿提交）；会话中断恢复后按陷阱 13 diff 核对确认无丢失
