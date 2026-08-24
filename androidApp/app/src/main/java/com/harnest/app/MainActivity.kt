@@ -548,9 +548,14 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 val reply = outcome.optString("text", "").trim().ifBlank {
-                    val err = outcome.optJSONObject("reason")?.optJSONObject("error")
-                    if (err != null) "⚠️ " + err.optString("message", err.optString("code", "error"))
-                    else "（无回复）"
+                    val reason = outcome.optJSONObject("reason")
+                    val err = reason?.optJSONObject("error")
+                    when {
+                        err != null -> "⚠️ " + err.optString("message", err.optString("code", "error"))
+                        reason?.optString("kind") == "max-tokens" ->
+                            "（模型输出达到长度上限被截断：深度思考占满了输出额度。可简化问题、降低思考强度，或换用输出额度更大的模型后重试）"
+                        else -> "（无回复）"
+                    }
                 }
                 session.messages.add(
                     StoredMessage(

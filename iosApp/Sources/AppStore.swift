@@ -417,6 +417,10 @@ final class AppStore: ObservableObject {
            let msg = err["message"] as? String, !msg.isEmpty {
             return msg
         }
+        if let reason = outcome["reason"] as? [String: Any],
+           (reason["kind"] as? String) == "max-tokens" {
+            return "（模型输出达到长度上限被截断：深度思考占满了输出额度。可简化问题、降低思考强度，或换用输出额度更大的模型后重试）"
+        }
         return "（模型没有返回内容）"
     }
 

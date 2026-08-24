@@ -403,7 +403,9 @@ export class HarnessEngine {
         id: m.id,
         ...(m.name !== undefined ? { name: m.name } : {}),
         ...(m.contextWindow !== undefined ? { contextWindow: m.contextWindow } : {}),
-        ...(m.maxTokens !== undefined ? { maxTokens: m.maxTokens } : {}),
+        ...(m.maxTokens !== undefined
+          ? { maxTokens: m.maxTokens }
+          : name === 'deepseek' && m.id.includes('reasoner') ? { maxTokens: 65536 } : {}),
       })),
       streamIdleTimeoutMs: 300_000,
       retryPolicy: resolveRetryPolicy(undefined, `harness: ${name}`),
@@ -914,6 +916,7 @@ export class HarnessEngine {
     if (!finalText && reason) {
       if (reason.kind === 'aborted') finalText = '（本轮已停止）'
       else if (reason.kind === 'max-steps') finalText = '（已达单回合工具步数上限，提前结束；继续发送消息可接着执行）'
+      else if (reason.kind === 'max-tokens') finalText = '（模型输出达到长度上限被截断：深度思考占满了输出额度。可简化问题、降低思考强度，或换用输出额度更大的模型后重试）'
     }
     this.emit('chat', { sessionId, text: finalText, reason, details })
     return { sessionId, text: finalText, reason, details }

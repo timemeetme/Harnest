@@ -958,6 +958,9 @@ export class AppViewModel {
     if (reason && reason.error && reason.error.message) {
       return reason.error.message;
     }
+    if (reason && reason.kind === 'max-tokens') {
+      return '（模型输出达到长度上限被截断：深度思考占满了输出额度。可简化问题、降低思考强度，或换用输出额度更大的模型后重试）';
+    }
     return '（模型未返回内容）';
   }
 }

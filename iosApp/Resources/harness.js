@@ -32650,7 +32650,7 @@ ${value}`, dataLines++;
           id: m.id,
           ...m.name !== void 0 ? { name: m.name } : {},
           ...m.contextWindow !== void 0 ? { contextWindow: m.contextWindow } : {},
-          ...m.maxTokens !== void 0 ? { maxTokens: m.maxTokens } : {}
+          ...m.maxTokens !== void 0 ? { maxTokens: m.maxTokens } : name4 === "deepseek" && m.id.includes("reasoner") ? { maxTokens: 65536 } : {}
         })),
         streamIdleTimeoutMs: 3e5,
         retryPolicy: resolveRetryPolicy(void 0, `harness: ${name4}`)
@@ -33059,6 +33059,7 @@ ${value}`, dataLines++;
       if (!finalText && reason) {
         if (reason.kind === "aborted") finalText = "\uFF08\u672C\u8F6E\u5DF2\u505C\u6B62\uFF09";
         else if (reason.kind === "max-steps") finalText = "\uFF08\u5DF2\u8FBE\u5355\u56DE\u5408\u5DE5\u5177\u6B65\u6570\u4E0A\u9650\uFF0C\u63D0\u524D\u7ED3\u675F\uFF1B\u7EE7\u7EED\u53D1\u9001\u6D88\u606F\u53EF\u63A5\u7740\u6267\u884C\uFF09";
+        else if (reason.kind === "max-tokens") finalText = "\uFF08\u6A21\u578B\u8F93\u51FA\u8FBE\u5230\u957F\u5EA6\u4E0A\u9650\u88AB\u622A\u65AD\uFF1A\u6DF1\u5EA6\u601D\u8003\u5360\u6EE1\u4E86\u8F93\u51FA\u989D\u5EA6\u3002\u53EF\u7B80\u5316\u95EE\u9898\u3001\u964D\u4F4E\u601D\u8003\u5F3A\u5EA6\uFF0C\u6216\u6362\u7528\u8F93\u51FA\u989D\u5EA6\u66F4\u5927\u7684\u6A21\u578B\u540E\u91CD\u8BD5\uFF09";
       }
       this.emit("chat", { sessionId, text: finalText, reason, details });
       return { sessionId, text: finalText, reason, details };
