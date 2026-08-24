@@ -673,7 +673,14 @@ export class HarnessEngine {
             if (this.thinkAccText.length - this.thinkEmitLen >= 64 || now - this.thinkEmitAt >= 200) {
               this.thinkEmitAt = now
               this.thinkEmitLen = this.thinkAccText.length
-              this.emit('round', { kind: 'thinking', seq: event.seq, text: this.thinkAccText })
+              // turn/step：宿主按 (turn,step) 精确分段（多步思考各成一段），替代脆弱的前缀失配检测
+              this.emit('round', {
+                kind: 'thinking',
+                seq: event.seq,
+                turn: Number(d.turn ?? 0) || 0,
+                step: Number(d.step ?? 0) || 0,
+                text: this.thinkAccText,
+              })
             }
           } else if (chunk && chunk.type === 'text-delta' && typeof chunk.text === 'string' && chunk.text.length > 0) {
             // 答案正文增量：与思考同构的累积 + 逐字级节流下发（16 字 / 60ms）
@@ -688,19 +695,28 @@ export class HarnessEngine {
             if (this.ansAccText.length - this.ansEmitLen >= 16 || now - this.ansEmitAt >= 60) {
               this.ansEmitAt = now
               this.ansEmitLen = this.ansAccText.length
-              this.emit('round', { kind: 'answer', seq: event.seq, text: this.ansAccText.slice(0, 20000) })
+              this.emit('round', {
+                kind: 'answer',
+                seq: event.seq,
+                turn: Number(d.turn ?? 0) || 0,
+                step: Number(d.step ?? 0) || 0,
+                text: this.ansAccText.slice(0, 20000),
+              })
             }
           }
         } else if (event.type === 'assistant/message') {
           const blocks = ((d.message && (d.message as { content?: Array<{ type?: string; text?: string }> }).content) || [])
+          const turn = Number(d.turn ?? 0) || 0
+          const step = Number(d.step ?? 0) || 0
           const reasoning = blocks.filter((b) => b && b.type === 'reasoning').map((b) => b.text || '').join('')
           if (reasoning.length > 0) {
-            this.emit('round', { kind: 'thinking', seq: event.seq, text: reasoning })
+            // 兜底整块同键 (turn,step) 幂等覆盖流式段（join 语义与流式累积一致），非流式 provider 直接建段
+            this.emit('round', { kind: 'thinking', seq: event.seq, turn, step, text: reasoning })
           }
           // 消息落定：flush 节流残留的答案尾部（不足阈值的最末几字）
           const answer = blocks.filter((b) => b && b.type === 'text').map((b) => b.text || '').join('')
           if (answer.length > 0) {
-            this.emit('round', { kind: 'answer', seq: event.seq, text: answer.slice(0, 20000) })
+            this.emit('round', { kind: 'answer', seq: event.seq, turn, step, text: answer.slice(0, 20000) })
           }
         } else if (event.type === 'tool/call') {
           this.emit('round', {

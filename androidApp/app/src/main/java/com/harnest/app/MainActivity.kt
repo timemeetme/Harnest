@@ -903,57 +903,37 @@ class MainActivity : ComponentActivity() {
     /** 把内核 round 事件归并进实时活动列表（思考段/工具行/待办快照/回复预览），驱动 LiveActivityPanel。 */
     private fun applyRoundEvent(o: JSONObject) {
         when (o.optString("kind")) {
-            "thinking-delta" -> {
-                // 流式思考增量：同 step 追加到尾段，跨 step 开新段（模型在工具调用间会再次思考）
+            "thinking" -> {
+                // 内核 emit 段内累积全量（64 字/200ms 节流）：同 (turn,step) 幂等覆盖，跨键开新段。
+                // indexOfLast 而非尾元素——assistant/message 兜底发来时该段可能已不在尾部（后有工具行）
                 val text = o.optString("text", "")
+                val turn = o.optInt("turn", 0)
                 val step = o.optInt("step", 0)
                 if (text.isNotEmpty()) {
-                    val last = liveItems.lastOrNull()
-                    if (last is LiveItem.Think && last.step == step) {
-                        liveItems[liveItems.size - 1] = last.copy(text = last.text + text)
+                    val idx = liveItems.indexOfLast { it is LiveItem.Think && it.turn == turn && it.step == step }
+                    if (idx >= 0) {
+                        val old = liveItems[idx] as LiveItem.Think
+                        if (text.length >= old.text.length) liveItems[idx] = old.copy(text = text)
                     } else {
-                        liveItems.add(LiveItem.Think(o.optInt("seq"), step, text))
+                        liveItems.add(LiveItem.Think(o.optInt("seq"), step, text, turn))
                     }
-                    roundThinkChars += text.length
+                    roundThinkChars = liveItems.filterIsInstance<LiveItem.Think>().sumOf { it.text.length }
                     busyHint.value = "思考中 · ${roundThinkChars} 字"
                 }
             }
-            "answer-delta" -> {
-                // 流式回复预览：单条追加，回合结束由最终 assistant 消息承接
-                val text = o.optString("text", "")
-                if (text.isNotEmpty()) {
-                    val last = liveItems.lastOrNull()
-                    if (last is LiveItem.Answer) {
-                        liveItems[liveItems.size - 1] = last.copy(text = last.text + text)
-                    } else {
-                        liveItems.add(LiveItem.Answer(text))
-                    }
-                    roundAnswerChars += text.length
-                    busyHint.value = "撰写回复 · ${roundAnswerChars} 字"
-                }
-            }
-            "thinking" -> {
-                // 完成锚点的整块思考（非流式 provider 兜底）
-                val text = o.optString("text", "")
-                val step = o.optInt("step", 0)
-                val last = liveItems.lastOrNull()
-                if (last is LiveItem.Think && last.step == step && text.length >= last.text.length && text.startsWith(last.text)) {
-                    liveItems[liveItems.size - 1] = last.copy(text = text)
-                } else {
-                    liveItems.add(LiveItem.Think(o.optInt("seq"), step, text))
-                }
-                roundThinkChars = liveItems.filterIsInstance<LiveItem.Think>().sumOf { it.text.length }
-                busyHint.value = "思考中 · ${roundThinkChars} 字"
-            }
             "answer" -> {
-                // 完成锚点的整块回复预览（前缀累积语义，与 thinking 整段同构）
+                // 回复预览：与 thinking 同构按 (turn,step) 分段累积覆盖（Answer 不入 trace，
+                // 最终 assistant 正文即完整形态）
                 val text = o.optString("text", "")
+                val turn = o.optInt("turn", 0)
+                val step = o.optInt("step", 0)
                 if (text.isNotEmpty()) {
-                    val last = liveItems.lastOrNull()
-                    if (last is LiveItem.Answer && text.length >= last.text.length && text.startsWith(last.text)) {
-                        liveItems[liveItems.size - 1] = last.copy(text = text)
+                    val idx = liveItems.indexOfLast { it is LiveItem.Answer && it.turn == turn && it.step == step }
+                    if (idx >= 0) {
+                        val old = liveItems[idx] as LiveItem.Answer
+                        if (text.length >= old.text.length) liveItems[idx] = old.copy(text = text)
                     } else {
-                        liveItems.add(LiveItem.Answer(text))
+                        liveItems.add(LiveItem.Answer(text, turn, step))
                     }
                     roundAnswerChars = liveItems.filterIsInstance<LiveItem.Answer>().sumOf { it.text.length }
                     busyHint.value = "撰写回复 · ${roundAnswerChars} 字"
@@ -1028,7 +1008,7 @@ class MainActivity : ComponentActivity() {
         for (item in liveItems) {
             val o = JSONObject()
             when (item) {
-                is LiveItem.Think -> o.put("k", "think").put("t", item.text).put("s", item.step)
+                is LiveItem.Think -> o.put("k", "think").put("t", item.text).put("s", item.step).put("u", item.turn)
                 is LiveItem.Tool -> o.put("k", "tool").put("n", item.name).put("a", item.args)
                     .put("s", item.status).put("r", item.result).put("ms", item.durationMs)
                 is LiveItem.Todos -> {

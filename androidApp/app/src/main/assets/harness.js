@@ -32846,7 +32846,13 @@ ${value}`, dataLines++;
               if (this.thinkAccText.length - this.thinkEmitLen >= 64 || now - this.thinkEmitAt >= 200) {
                 this.thinkEmitAt = now;
                 this.thinkEmitLen = this.thinkAccText.length;
-                this.emit("round", { kind: "thinking", seq: event.seq, text: this.thinkAccText });
+                this.emit("round", {
+                  kind: "thinking",
+                  seq: event.seq,
+                  turn: Number(d.turn ?? 0) || 0,
+                  step: Number(d.step ?? 0) || 0,
+                  text: this.thinkAccText
+                });
               }
             } else if (chunk && chunk.type === "text-delta" && typeof chunk.text === "string" && chunk.text.length > 0) {
               const key = `${String(d.turn ?? "")}:${String(d.step ?? "")}`;
@@ -32860,18 +32866,26 @@ ${value}`, dataLines++;
               if (this.ansAccText.length - this.ansEmitLen >= 16 || now - this.ansEmitAt >= 60) {
                 this.ansEmitAt = now;
                 this.ansEmitLen = this.ansAccText.length;
-                this.emit("round", { kind: "answer", seq: event.seq, text: this.ansAccText.slice(0, 2e4) });
+                this.emit("round", {
+                  kind: "answer",
+                  seq: event.seq,
+                  turn: Number(d.turn ?? 0) || 0,
+                  step: Number(d.step ?? 0) || 0,
+                  text: this.ansAccText.slice(0, 2e4)
+                });
               }
             }
           } else if (event.type === "assistant/message") {
             const blocks = d.message && d.message.content || [];
+            const turn = Number(d.turn ?? 0) || 0;
+            const step = Number(d.step ?? 0) || 0;
             const reasoning = blocks.filter((b) => b && b.type === "reasoning").map((b) => b.text || "").join("");
             if (reasoning.length > 0) {
-              this.emit("round", { kind: "thinking", seq: event.seq, text: reasoning });
+              this.emit("round", { kind: "thinking", seq: event.seq, turn, step, text: reasoning });
             }
             const answer = blocks.filter((b) => b && b.type === "text").map((b) => b.text || "").join("");
             if (answer.length > 0) {
-              this.emit("round", { kind: "answer", seq: event.seq, text: answer.slice(0, 2e4) });
+              this.emit("round", { kind: "answer", seq: event.seq, turn, step, text: answer.slice(0, 2e4) });
             }
           } else if (event.type === "tool/call") {
             this.emit("round", {

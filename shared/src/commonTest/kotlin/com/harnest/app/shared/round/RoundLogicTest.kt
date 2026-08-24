@@ -31,6 +31,29 @@ class RoundLogicTest {
     }
 
     @Test
+    fun sameStepAcrossTurnsStartsNewSegment() {
+        val items = mutableListOf<LiveItem>()
+        val stats = RoundStats()
+        applyRoundEvent(items, RoundEvent.ThinkingDelta(1, 0, "t0"), stats)
+        applyRoundEvent(items, RoundEvent.ThinkingDelta(2, 0, "t1", turn = 1), stats)
+        assertEquals(2, items.size)
+        val second = items[1] as LiveItem.Think
+        assertEquals(1, second.turn)
+        assertEquals("t1", second.text)
+    }
+
+    @Test
+    fun thinkingWholeCoversSameKeyWithoutPrefixCheck() {
+        val items = mutableListOf<LiveItem>()
+        val stats = RoundStats()
+        applyRoundEvent(items, RoundEvent.ThinkingDelta(3, 0, "hel", turn = 1), stats)
+        applyRoundEvent(items, RoundEvent.ThinkingWhole(3, 0, "完整替换文本", turn = 1), stats)
+        assertEquals(1, items.size)
+        assertEquals("完整替换文本", (items[0] as LiveItem.Think).text)
+        assertEquals(1, (items[0] as LiveItem.Think).turn)
+    }
+
+    @Test
     fun thinkingWholeOverridesStreamingPrefix() {
         val items = mutableListOf<LiveItem>()
         val stats = RoundStats()
@@ -84,6 +107,20 @@ class RoundLogicTest {
         assertTrue(out != null)
         assertEquals(items, parseTrace(out!!))
         assertTrue(items[1] is LiveItem.Tool && (items[1] as LiveItem.Tool).durationMs == 1500L)
+    }
+
+    @Test
+    fun traceRoundTripPreservesTurnKeyAndToleratesLegacy() {
+        val items = listOf(
+            LiveItem.Think(0, 0, "第一轮"),
+            LiveItem.Think(1, 0, "第二轮", turn = 1),
+        )
+        val out = traceToJson(items)!!
+        assertTrue(out.contains("\"u\":1"))
+        val back = parseTrace(out)
+        assertEquals(0, (back[0] as LiveItem.Think).turn)
+        assertEquals(1, (back[1] as LiveItem.Think).turn)
+        assertEquals(0, (parseTrace("""[{"k":"think","t":"旧轨迹","s":0}]""")[0] as LiveItem.Think).turn)
     }
 
     @Test

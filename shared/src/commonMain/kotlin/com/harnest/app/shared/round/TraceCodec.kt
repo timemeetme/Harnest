@@ -27,6 +27,7 @@ fun traceToJson(items: List<LiveItem>): String? {
                         put("k", "think")
                         put("t", item.text)
                         put("s", item.step)
+                        put("u", item.turn)
                     }
                 )
 
@@ -88,7 +89,7 @@ fun parseTrace(json: String): List<LiveItem> {
         arr.mapIndexedNotNull { i, el ->
             val o = el as? JsonObject ?: return@mapIndexedNotNull null
             when (o.str("k")) {
-                "think" -> LiveItem.Think(i, o.int("s") ?: 0, o.str("t"))
+                "think" -> LiveItem.Think(i, o.int("s") ?: 0, o.str("t"), o.int("u") ?: 0)
                 "steer" -> LiveItem.Steer(o.str("t"))
                 "subagent" -> LiveItem.Subagent(o.str("rid"), o.str("sq"), o.str("l"), o.str("p"), o.str("o"))
                 "tool" -> LiveItem.Tool(

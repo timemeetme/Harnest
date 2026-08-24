@@ -55,6 +55,9 @@ export class ChatMessage {
 export class LiveItem {
   kind: string = 'think';
   seq: number = 0;
+  /** (turn,step) 双键定位段：内核事件自带，跨 turn 同 step 序号不串段（trace 持久化 "u"/"s"） */
+  turn: number = 0;
+  step: number = 0;
   text: string = '';
   callId: string = '';
   name: string = '';

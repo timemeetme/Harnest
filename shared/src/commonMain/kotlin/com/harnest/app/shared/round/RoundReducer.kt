@@ -13,10 +13,10 @@ fun applyRoundEvent(items: MutableList<LiveItem>, event: RoundEvent, stats: Roun
         is RoundEvent.ThinkingDelta -> {
             if (event.text.isEmpty()) return null
             val last = items.lastOrNull()
-            if (last is LiveItem.Think && last.step == event.step) {
+            if (last is LiveItem.Think && last.step == event.step && last.turn == event.turn) {
                 items[items.size - 1] = last.copy(text = last.text + event.text)
             } else {
-                items.add(LiveItem.Think(event.seq, event.step, event.text))
+                items.add(LiveItem.Think(event.seq, event.step, event.text, event.turn))
             }
             stats.thinkChars += event.text.length
             return "思考中 · ${stats.thinkChars} 字"
@@ -36,12 +36,12 @@ fun applyRoundEvent(items: MutableList<LiveItem>, event: RoundEvent, stats: Roun
 
         is RoundEvent.ThinkingWhole -> {
             val last = items.lastOrNull()
-            if (last is LiveItem.Think && last.step == event.step &&
-                event.text.length >= last.text.length && event.text.startsWith(last.text)
+            if (last is LiveItem.Think && last.step == event.step && last.turn == event.turn &&
+                event.text.length >= last.text.length
             ) {
                 items[items.size - 1] = last.copy(text = event.text)
             } else {
-                items.add(LiveItem.Think(event.seq, event.step, event.text))
+                items.add(LiveItem.Think(event.seq, event.step, event.text, event.turn))
             }
             stats.thinkChars = items.filterIsInstance<LiveItem.Think>().sumOf { it.text.length }
             return "思考中 · ${stats.thinkChars} 字"

@@ -38,6 +38,9 @@ struct LiveItem: Identifiable {
     let id = UUID()
     let kind: Kind
     var seq = 0
+    /// (turn,step) 双键定位段：内核事件自带，跨 turn 同 step 序号不串段（trace 持久化 "u"/"s"）。
+    var turn = 0
+    var step = 0
     var text = ""
     var callId = ""
     var name = ""
@@ -86,6 +89,8 @@ final class AppStore: ObservableObject {
     /// 思考文本节流：避免高频 thinking 事件（60ms 一次、万字文本）卡死 UI
     private var thinkThrottleAt: TimeInterval = 0
     private var thinkPending: String?
+    private var thinkPendingTurn = 0
+    private var thinkPendingStep = 0
 
     /// k6 停止标志（doSend 收尾时检查 — 清空队列 vs 续发）
     private var stopped = false
@@ -357,16 +362,23 @@ final class AppStore: ObservableObject {
         guard let text = thinkPending else { return }
         thinkPending = nil
         var items = liveItems
-        if var last = items.last, last.kind == .think,
-           text.count >= last.text.count, text.hasPrefix(last.text) {
-            last.text = text
-            items[items.count - 1] = last
+        upsertThink(&items, text: text, turn: thinkPendingTurn, step: thinkPendingStep, seq: 0)
+        liveItems = items
+    }
+
+    /// 按 (turn,step) 幂等 upsert 思考段：内核事件携带段内累积全量，同键且更长时覆盖。
+    private func upsertThink(_ items: inout [LiveItem], text: String, turn: Int, step: Int, seq: Int) {
+        if let i = items.lastIndex(where: { $0.kind == .think && $0.turn == turn && $0.step == step }),
+           text.count >= items[i].text.count {
+            items[i].text = text
         } else {
             var item = LiveItem(kind: .think)
+            item.seq = seq
+            item.turn = turn
+            item.step = step
             item.text = text
             items.append(item)
         }
-        liveItems = items
     }
 
     private func appendOutcome(_ session: inout SessionRecord, _ outcome: [String: Any], roundStart: Date) {
@@ -708,22 +720,33 @@ final class AppStore: ObservableObject {
         switch kind {
         case "thinking":
             let text = o["text"] as? String ?? ""
+            let turn = (o["turn"] as? NSNumber)?.intValue ?? 0
+            let step = (o["step"] as? NSNumber)?.intValue ?? 0
             let now = Date().timeIntervalSince1970
             // 节流：150ms 内的 thinking 事件只暂存不刷新 UI（窗口须严格小于内核 200ms
-            // 心跳，避免同频相位锁死导致整轮不刷新）；万字文本每 60ms 全量重发会卡死主线程
+            // 心跳，避免同频相位锁死导致整轮不刷新）；万字文本每 60ms 全量重发会卡死主线程。
+            // 暂存带 (turn,step) 键——窗口内切段时 flush 不会误并到新段
             if now - thinkThrottleAt < 0.15 {
                 thinkPending = text
+                thinkPendingTurn = turn
+                thinkPendingStep = step
                 return
             }
             thinkThrottleAt = now
-            thinkPending = nil
-            if var last = items.last, last.kind == .think,
-               text.count >= last.text.count, text.hasPrefix(last.text) {
-                last.text = text
-                items[items.count - 1] = last
+            upsertThink(&items, text: text, turn: turn, step: step,
+                        seq: (o["seq"] as? NSNumber)?.intValue ?? 0)
+        case "answer":
+            // 回复预览：与思考同构按 (turn,step) 分段 upsert（内核段内累积全量）
+            let text = o["text"] as? String ?? ""
+            let turn = (o["turn"] as? NSNumber)?.intValue ?? 0
+            let step = (o["step"] as? NSNumber)?.intValue ?? 0
+            if let i = items.lastIndex(where: { $0.kind == .answer && $0.turn == turn && $0.step == step }),
+               text.count >= items[i].text.count {
+                items[i].text = text
             } else {
-                var item = LiveItem(kind: .think)
-                item.seq = (o["seq"] as? NSNumber)?.intValue ?? 0
+                var item = LiveItem(kind: .answer)
+                item.turn = turn
+                item.step = step
                 item.text = text
                 items.append(item)
             }
@@ -797,7 +820,7 @@ final class AppStore: ObservableObject {
         for it in liveItems {
             switch it.kind {
             case .think:
-                arr.append(["k": "think", "t": it.text])
+                arr.append(["k": "think", "t": it.text, "s": it.step, "u": it.turn])
             case .answer:
                 break // 回复预览不入轨迹：最终 assistant 正文即完整形态
             case .tool:
@@ -822,7 +845,10 @@ final class AppStore: ObservableObject {
         for o in arr {
             switch o["k"] as? String ?? "" {
             case "think":
-                out.append(LiveItem(kind: .think, text: o["t"] as? String ?? ""))
+                var item = LiveItem(kind: .think, text: o["t"] as? String ?? "")
+                item.step = (o["s"] as? NSNumber)?.intValue ?? 0
+                item.turn = (o["u"] as? NSNumber)?.intValue ?? 0
+                out.append(item)
             case "tool":
                 out.append(LiveItem(kind: .tool,
                                     name: o["n"] as? String ?? "",

@@ -1065,7 +1065,7 @@ export struct ChatView {
       } else if (it.kind === 'subagent') {
         parts.push(it.kind + it.name + '_' + it.status + '_' + it.result.length);
       } else {
-        parts.push(it.kind + it.seq + '_' + it.text.length);
+        parts.push(it.kind + it.seq + '_' + it.turn + '_' + it.step + '_' + it.text.length);
       }
     }
     return parts.join('-');
@@ -1141,7 +1141,7 @@ export struct ChatView {
                 } else if (group[0].kind === 'tool') {
                   this.toolLiveRow(group[0], panelKey + '_tl' + idx)
                 } else if (group[0].kind === 'answer') {
-                  this.answerLiveBlock(group[0], isSending)
+                  this.answerLiveBlock(group, isSending, panelKey + '_ab' + idx)
                 } else {
                   this.todosLiveBlock(group[0], panelKey + '_td' + idx)
                 }
@@ -1171,7 +1171,7 @@ export struct ChatView {
           .fontSize('11fp')
           .fontColor(this.theme.textHint)
         Text('💭').fontSize('12fp').margin({ left: 7 })
-        Text('思考过程' + (segments.length > 1 ? ' · ' + segments.length + ' 段' : ''))
+        Text((autoExpand ? '思考中' : '思考过程') + (segments.length > 1 ? ' · ' + segments.length + ' 段' : ''))
           .fontSize('13fp')
           .fontColor(this.theme.textPrimary)
           .margin({ left: 6 })
@@ -1198,7 +1198,9 @@ export struct ChatView {
                 .strokeWidth(0.5)
                 .margin({ top: 2, bottom: 2 })
             }
-            this.thinkSegment(seg, key + '_s' + idx)
+            this.thinkSegment(seg, key + '_s' + idx,
+              segments.length > 1 ? '第 ' + (idx + 1) + ' 段' : '',
+              autoExpand && idx === segments.length - 1)
           }
         }, (seg: LiveItem, idx: number) => key + '_seg' + idx + '_' + seg.seq + '_' + seg.text.length)
       }
@@ -1207,44 +1209,120 @@ export struct ChatView {
     .alignItems(HorizontalAlign.Start)
   }
 
-  /** 单段思考：完整展示不截断。 */
+  /** 单段思考（三级折叠 L3）：默认折叠只渲染单行摘要——性能关键，内核每 200ms 发段内累积全量，
+   *  万字全文常驻重排会卡死 UI（对齐 iOS/Android 同名组件）。点击展开全文（>4000 字尾部截断）。 */
   @Builder
-  thinkSegment(seg: LiveItem, key: string) {
-    Text(seg.text)
-      .fontSize('12fp')
-      .fontColor(this.theme.textHint)
-      .lineHeight(17)
+  thinkSegment(seg: LiveItem, key: string, label: string, running: boolean) {
+    Column() {
+      Row() {
+        if (label.length > 0) {
+          Text(label).fontSize('11fp').fontColor(this.theme.textPrimary)
+        }
+        Text(this.thinkSummaryLine(seg.text, running))
+          .fontSize('11fp')
+          .fontColor(this.theme.textHint)
+          .layoutWeight(1)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .margin({ left: label.length > 0 ? 6 : 0 })
+        Text(seg.text.length + ' 字')
+          .fontSize('10fp')
+          .fontColor(this.theme.textHint)
+          .margin({ left: 6 })
+          .maxLines(1)
+        Text(this.isLiveOpen(key, false) ? '▾' : '▸')
+          .fontSize('10fp')
+          .fontColor(this.theme.textHint)
+      }
       .width('100%')
+      .alignItems(VerticalAlign.Center)
       .padding({ top: 4, bottom: 4 })
+      .onClick(() => {
+        this.toggleLive(key, false);
+      })
+
+      if (this.isLiveOpen(key, false)) {
+        Text(seg.text.length > 4000 ? '…' + seg.text.substring(seg.text.length - 4000) : seg.text)
+          .fontSize('12fp')
+          .fontColor(this.theme.textHint)
+          .lineHeight(17)
+          .width('100%')
+          .padding({ top: 2, bottom: 2 })
+      }
+    }
+    .width('100%')
+    .alignItems(HorizontalAlign.Start)
   }
 
-  /** 流式答案块：逐字到达的答案正文 + 光标；round 结束后由正式消息气泡接管。 */
+  /** ReasoningRow 摘要语义（对齐内核/iOS/Android）：running 跟尾最新非空行（尾部 60 字滑动窗），定稿回首行。 */
+  private thinkSummaryLine(text: string, running: boolean): string {
+    const lines = text.split('\n');
+    let picked = '';
+    if (running) {
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (lines[i].trim().length > 0) {
+          picked = lines[i].trim();
+          break;
+        }
+      }
+    } else {
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].trim().length > 0) {
+          picked = lines[i].trim();
+          break;
+        }
+      }
+    }
+    if (picked.length === 0) {
+      return '';
+    }
+    return picked.length > 60 ? '…' + picked.substring(picked.length - 60) : picked;
+  }
+
+  /** 流式答案块：按 (turn,step) 分段归并后整组拼接渲染 + 折叠（流式展开跟随、结束默认收起）；
+   *  展开正文 maxLines 封顶防万字重排卡顿；round 结束后由正式消息气泡接管。 */
   @Builder
-  answerLiveBlock(ans: LiveItem, isSending: boolean) {
+  answerLiveBlock(segments: LiveItem[], isSending: boolean, key: string) {
+    let text = '';
+    for (const s of segments) {
+      text += s.text;
+    }
     Column() {
       Row() {
         Text('✍️').fontSize('12fp')
-        Text('回答')
+        Text(isSending ? '回答' : '回复预览')
           .fontSize('13fp')
           .fontColor(this.theme.textPrimary)
           .fontWeight(FontWeight.Medium)
           .margin({ left: 6 })
           .layoutWeight(1)
           .maxLines(1)
-        Text(ans.text.length + ' 字')
+        Text(text.length + ' 字')
           .fontSize('10fp')
           .fontColor(this.theme.textHint)
           .maxLines(1)
+          .margin({ left: 6 })
+        Text(this.isLiveOpen(key, isSending) ? '▾' : '▸')
+          .fontSize('10fp')
+          .fontColor(this.theme.textHint)
       }
       .width('100%')
       .alignItems(VerticalAlign.Center)
+      .padding({ top: 5, bottom: 5 })
+      .onClick(() => {
+        this.toggleLive(key, isSending);
+      })
 
-      Text(isSending ? ans.text + '▍' : ans.text)
-        .fontSize('13fp')
-        .fontColor(this.theme.textPrimary)
-        .lineHeight(19)
-        .width('100%')
-        .padding({ top: 6, bottom: 2 })
+      if (this.isLiveOpen(key, isSending)) {
+        Text(isSending ? text + '▍' : text)
+          .fontSize('13fp')
+          .fontColor(this.theme.textPrimary)
+          .lineHeight(19)
+          .width('100%')
+          .maxLines(20)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .padding({ top: 6, bottom: 2 })
+      }
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -1374,6 +1452,8 @@ export function parseTrace(json: string): LiveItem[] {
         const item = new LiveItem();
         item.kind = 'think';
         item.text = (o['t'] as string) ?? '';
+        item.step = (o['s'] as number) ?? 0;
+        item.turn = (o['u'] as number) ?? 0;
         out.push(item);
       } else if (k === 'tool') {
         const item = new LiveItem();

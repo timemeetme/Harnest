@@ -1269,7 +1269,8 @@ private fun BgJobRow(job: BgJobView, onKill: ((String) -> Unit)?) {
 @Composable
 private fun ThinkGroup(segments: List<LiveItem.Think>, autoExpand: Boolean) {
     val c = harnessColors()
-    val key = segments.firstOrNull()?.seq ?: 0
+    val head = segments.firstOrNull()
+    val key = head?.let { "${it.turn}:${it.step}" } ?: "0"
     var expanded by remember(key, autoExpand) { mutableStateOf(autoExpand) }
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -1284,7 +1285,7 @@ private fun ThinkGroup(segments: List<LiveItem.Think>, autoExpand: Boolean) {
             Text("💭", fontSize = 12.sp)
             Spacer(Modifier.width(6.dp))
             Text(
-                "思考过程" + if (segments.size > 1) " · ${segments.size} 段" else "",
+                (if (autoExpand) "思考中" else "思考过程") + if (segments.size > 1) " · ${segments.size} 段" else "",
                 color = c.textPrimary,
                 fontSize = 13.sp,
             )
@@ -1301,17 +1302,11 @@ private fun ThinkGroup(segments: List<LiveItem.Think>, autoExpand: Boolean) {
                             .background(c.divider.copy(alpha = 0.4f)),
                     )
                 }
-                if (segments.size > 1) {
-                    Row(
-                        Modifier.padding(start = 2.dp, top = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(Modifier.size(3.dp).background(c.primary.copy(alpha = 0.55f), CircleShape))
-                        Spacer(Modifier.width(5.dp))
-                        Text("第 ${seg.step + 1} 轮思考", color = c.textHint, fontSize = 10.sp)
-                    }
-                }
-                ThinkSegment(seg)
+                ThinkSegment(
+                    seg,
+                    label = if (segments.size > 1) "第 ${idx + 1} 段" else null,
+                    running = autoExpand && idx == segments.lastIndex,
+                )
             }
         }
     }
@@ -1355,19 +1350,56 @@ private fun AnswerGroup(segments: List<LiveItem.Answer>, autoExpand: Boolean) {
     }
 }
 
-/** 单段思考（二级折叠）：默认 3 行截断，点击切换全文。 */
+/** 单段思考（三级折叠 L3）：默认折叠只渲染单行摘要——性能关键，内核每 200ms 发段内累积全量，
+ *  万字全文常驻重排会卡死 UI（对齐 iOS ThinkSegmentRow）。点击展开全文（>4000 字尾部截断）。 */
 @Composable
-private fun ThinkSegment(seg: LiveItem.Think) {
+private fun ThinkSegment(seg: LiveItem.Think, label: String?, running: Boolean) {
     val c = harnessColors()
-    Text(
-        seg.text,
-        color = c.textHint,
-        fontSize = 12.sp,
-        lineHeight = 17.sp,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
-    )
+    var expanded by remember(seg.turn, seg.step) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { expanded = !expanded }
+                .padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (label != null) {
+                Text(label, color = c.textPrimary, fontSize = 11.sp)
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(
+                thinkSummaryLine(seg.text, running),
+                color = c.textHint,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(6.dp))
+            Text("${seg.text.length} 字", color = c.textHint, fontSize = 10.sp)
+            Text(if (expanded) "▾" else "▸", color = c.textHint, fontSize = 10.sp)
+        }
+        if (expanded) {
+            Text(
+                if (seg.text.length > 4000) "…" + seg.text.takeLast(4000) else seg.text,
+                color = c.textHint,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+            )
+        }
+    }
+}
+
+/** ReasoningRow 摘要语义（对齐内核/iOS）：running 跟尾最新非空行（尾部 60 字滑动窗），定稿回首行。 */
+private fun thinkSummaryLine(text: String, running: Boolean): String {
+    val lines = text.split('\n').filter { it.isNotBlank() }
+    val picked = (if (running) lines.lastOrNull() else lines.firstOrNull()) ?: return ""
+    val t = picked.trim()
+    return if (t.length > 60) "…" + t.takeLast(60) else t
 }
 
 /** k7 工具类型 → 专属卡片类别（图标 + 摘要抽取 + 终端等宽渲染）。 */

@@ -7,7 +7,8 @@ package com.harnest.app.shared.round
 
 /** 实时回合活动条目（内核 round 事件归并而来）：思考段 / 工具调用 / 待办快照 / 回复预览。 */
 sealed class LiveItem {
-    data class Think(val seq: Int, val step: Int, val text: String) : LiveItem()
+    /** turn+step 双键定位段（内核事件自带；trace 持久化 "u"/"s"），跨 turn 同 step 序号不串段。 */
+    data class Think(val seq: Int, val step: Int, val text: String, val turn: Int = 0) : LiveItem()
     data class Tool(
         val callId: String,
         val name: String,
@@ -18,7 +19,9 @@ sealed class LiveItem {
     ) : LiveItem()
 
     data class Todos(val items: List<Pair<String, String>>) : LiveItem()
-    data class Answer(val text: String) : LiveItem()
+
+    /** 回复预览：与 Think 同构按 (turn,step) 分段（trace 不持久化，最终 assistant 正文为完整形态）。 */
+    data class Answer(val text: String, val turn: Int = 0, val step: Int = 0) : LiveItem()
 
     /** k4 中途转向注入：实时面板展示 ⚡ 条目（内核下一 step 边界 claim，不入内核事件流）。 */
     data class Steer(val text: String) : LiveItem()
@@ -35,14 +38,14 @@ sealed class LiveItem {
 
 /** 内核 round 事件（宿主负责把平台 JSON 适配为这些强类型事件，见 Android MainActivity / 未来 iOS 桥）。 */
 sealed class RoundEvent {
-    /** 流式思考增量（同 step 归并追加）。 */
-    data class ThinkingDelta(val seq: Int, val step: Int, val text: String) : RoundEvent()
+    /** 流式思考增量（同 (turn,step) 归并追加）。 */
+    data class ThinkingDelta(val seq: Int, val step: Int, val text: String, val turn: Int = 0) : RoundEvent()
 
     /** 流式回复增量。 */
     data class AnswerDelta(val text: String) : RoundEvent()
 
-    /** 整段思考兜底（completion 锚点，流式缺失/更短时以全量覆盖）。 */
-    data class ThinkingWhole(val seq: Int, val step: Int, val text: String) : RoundEvent()
+    /** 整段思考兜底（completion 锚点，同 (turn,step) 幂等覆盖流式段）。 */
+    data class ThinkingWhole(val seq: Int, val step: Int, val text: String, val turn: Int = 0) : RoundEvent()
 
     data class ToolStart(val callId: String, val name: String, val args: String) : RoundEvent()
     data class ToolEnd(val callId: String, val status: String, val result: String, val durationMs: Long) : RoundEvent()

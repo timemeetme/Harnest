@@ -16,6 +16,9 @@ const DOMAIN = 0x0304;
 export interface RoundEvent {
   kind: string;
   seq: number;
+  /** (turn,step) 双键定位思考/回复段（内核 emit 段内累积全量，宿主同键覆盖） */
+  turn?: number;
+  step?: number;
   text?: string;
   callId?: string;
   name?: string;

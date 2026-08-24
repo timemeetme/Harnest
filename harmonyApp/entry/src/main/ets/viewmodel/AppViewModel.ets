@@ -662,33 +662,58 @@ export class AppViewModel {
     }
     const items = this.state.liveItems.slice();
     if (evt.kind === 'thinking') {
+      // 内核 emit 段内累积全量（64 字/200ms 节流）：同 (turn,step) 幂等覆盖，跨键开新段。
+      // 倒序查找而非只看尾元素——assistant/message 兜底发来时段后可能已有工具行
       const text = evt.text ?? '';
-      const last = items.length > 0 ? items[items.length - 1] : null;
-      if (last !== null && last.kind === 'think'
-        && text.length >= last.text.length && text.startsWith(last.text)) {
-        const updated = this.cloneItem(last);
-        updated.text = text;
-        items[items.length - 1] = updated;
+      const turn = evt.turn ?? 0;
+      const step = evt.step ?? 0;
+      let idx = -1;
+      for (let i = items.length - 1; i >= 0; i--) {
+        if (items[i].kind === 'think' && items[i].turn === turn && items[i].step === step) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx >= 0) {
+        if (text.length >= items[idx].text.length) {
+          const updated = this.cloneItem(items[idx]);
+          updated.text = text;
+          items[idx] = updated;
+        }
       } else {
         const item = new LiveItem();
         item.kind = 'think';
         item.seq = evt.seq;
+        item.turn = turn;
+        item.step = step;
         item.text = text;
         items.push(item);
       }
     } else if (evt.kind === 'answer') {
-      // 流式答案正文：与思考同构的前缀归并（同一 step 的累积文本原位替换）
+      // 流式答案正文：与思考同构按 (turn,step) 分段累积覆盖（Answer 不入 trace，
+      // 最终 assistant 正文即完整形态）
       const text = evt.text ?? '';
-      const last = items.length > 0 ? items[items.length - 1] : null;
-      if (last !== null && last.kind === 'answer'
-        && text.length >= last.text.length && text.startsWith(last.text)) {
-        const updated = this.cloneItem(last);
-        updated.text = text;
-        items[items.length - 1] = updated;
+      const turn = evt.turn ?? 0;
+      const step = evt.step ?? 0;
+      let idx = -1;
+      for (let i = items.length - 1; i >= 0; i--) {
+        if (items[i].kind === 'answer' && items[i].turn === turn && items[i].step === step) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx >= 0) {
+        if (text.length >= items[idx].text.length) {
+          const updated = this.cloneItem(items[idx]);
+          updated.text = text;
+          items[idx] = updated;
+        }
       } else {
         const item = new LiveItem();
         item.kind = 'answer';
         item.seq = evt.seq;
+        item.turn = turn;
+        item.step = step;
         item.text = text;
         items.push(item);
       }
@@ -786,7 +811,7 @@ export class AppViewModel {
     const arr: Record<string, Object>[] = [];
     for (const it of items) {
       if (it.kind === 'think') {
-        arr.push({ 'k': 'think', 't': it.text });
+        arr.push({ 'k': 'think', 't': it.text, 's': it.step, 'u': it.turn });
       } else if (it.kind === 'tool') {
         arr.push({ 'k': 'tool', 'n': it.name, 'a': it.args, 's': it.status, 'r': it.result });
       } else if (it.kind === 'steer') {

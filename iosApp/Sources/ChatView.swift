@@ -803,9 +803,21 @@ struct LiveActivityPanel: View {
                     ScrollViewReader { proxy in
                         ScrollView {
                             VStack(alignment: .leading, spacing: 8) {
-                                ForEach(items) { item in
-                                    LiveItemRow(item: item)
-                                        .id(item.id)
+                                let groups = liveGroups(from: items)
+                                ForEach(groups) { group in
+                                    switch group {
+                                    case .think(let segs):
+                                        ThinkGroupView(
+                                            segments: segs,
+                                            live: live,
+                                            running: live && group.id == groups.last?.id
+                                        )
+                                    case .answer(let segs):
+                                        AnswerPreviewRow(segments: segs)
+                                    case .single(let item):
+                                        LiveItemRow(item: item)
+                                            .id(item.id)
+                                    }
                                 }
                                 Color.clear.frame(height: 1).id("liveBottom")
                             }
@@ -861,21 +873,152 @@ private struct PulseDot: View {
     }
 }
 
-/// 单条活动行：思考/工具/转向/子代理/待办 五类形态。
-private struct LiveItemRow: View {
-    let item: LiveItem
+// ── 三级折叠：面板(L1) → 思考组(L2) → 段(L3)，对齐内核 ReasoningRow 语义 ──
+
+/// 活动条目分组：相邻 think / answer 各归一组（组=折叠单元），其余独立。
+private enum LiveGroup: Identifiable {
+    case think([LiveItem])
+    case answer([LiveItem])
+    case single(LiveItem)
+
+    var id: String {
+        switch self {
+        case .think(let segs): return "think-\(segs.first?.id.uuidString ?? "0")"
+        case .answer(let segs): return "answer-\(segs.first?.id.uuidString ?? "0")"
+        case .single(let item): return "single-\(item.id.uuidString)"
+        }
+    }
+}
+
+private func liveGroups(from items: [LiveItem]) -> [LiveGroup] {
+    var groups: [LiveGroup] = []
+    var i = 0
+    while i < items.count {
+        if items[i].kind == .think || items[i].kind == .answer {
+            let wantThink = items[i].kind == .think
+            var j = i
+            while j < items.count && items[j].kind == (wantThink ? .think : .answer) { j += 1 }
+            let slice = Array(items[i..<j])
+            groups.append(wantThink ? .think(slice) : .answer(slice))
+            i = j
+        } else {
+            groups.append(.single(items[i]))
+            i += 1
+        }
+    }
+    return groups
+}
+
+/// ReasoningRow 摘要语义：running 跟尾最新非空行（尾部 60 字滑动窗），定稿回首行。
+private func thinkSummaryLine(_ text: String, running: Bool) -> String {
+    let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+    guard let picked = (running ? lines.last : lines.first) else { return "" }
+    let t = picked.trimmingCharacters(in: .whitespaces)
+    return t.count > 60 ? "…" + String(t.suffix(60)) : t
+}
+
+/// L2 思考组：N 段汇总折叠（live 流式中自动展开，回合结束自动收起，可手动切换）。
+private struct ThinkGroupView: View {
+    let segments: [LiveItem]
+    let live: Bool
+    /// 组内末段正在流式输出（面板内最后一个组且是 think 时为 true）。
+    let running: Bool
+
+    @State private var expanded = false
+
+    private var chars: Int { segments.reduce(0) { $0 + $1.text.count } }
 
     var body: some View {
-        switch item.kind {
-        case .think:
-            VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                withAnimation(.easeOut(duration: 0.18)) { expanded.toggle() }
+            } label: {
                 HStack(spacing: 5) {
                     Text("💭")
                         .font(.system(size: 11))
-                    Text("思考 · 第 \(item.seq) 轮")
+                    Text(running ? "思考中 · \(segments.count) 段 · \(chars) 字" : "思考过程 · \(segments.count) 段 · \(chars) 字")
                         .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(running ? Theme.primary : Theme.textHint)
+                        .lineLimit(1)
+                    Spacer()
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(Theme.textHint)
                 }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array(segments.enumerated()), id: \.element.id) { idx, seg in
+                        ThinkSegmentRow(
+                            item: seg,
+                            label: segments.count > 1 ? "第 \(idx + 1) 段" : nil,
+                            running: running && idx == segments.count - 1
+                        )
+                    }
+                }
+                .padding(.leading, 4)
+                .transition(.opacity)
+            }
+        }
+        .onAppear {
+            if live && running { expanded = true }
+        }
+        .onChange(of: running) { _, r in
+            // 流式结束自动收起组（与 L1 面板节奏一致），用户仍可手动展开
+            if !r && expanded {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                    withAnimation(.easeOut(duration: 0.18)) { expanded = false }
+                }
+            }
+        }
+    }
+}
+
+/// L3 思考段：默认折叠只渲染单行摘要（性能关键——万字流式时避免全文重排），
+/// 点击展开全文（4000 字封顶）；running 时摘要跟尾，定稿回首行。
+private struct ThinkSegmentRow: View {
+    let item: LiveItem
+    let label: String?
+    let running: Bool
+
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 5) {
+                    if let label = label {
+                        Text(label)
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.textHint)
+                    }
+                    Text(expanded ? "收起 · \(item.text.count) 字" : thinkSummaryLine(item.text, running: running))
+                        .font(.system(size: 10))
+                        .foregroundStyle(expanded ? Theme.textHint : Theme.textSecondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if !expanded {
+                        Text("\(item.text.count) 字")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.textHint)
+                    }
+                    Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(Theme.textHint)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if expanded {
                 Text(item.text.count > 4000
                      ? "…（已省略 \(item.text.count - 4000) 字，仅展示尾部）\n\(item.text.suffix(4000))"
                      : item.text)
@@ -883,19 +1026,67 @@ private struct LiveItemRow: View {
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(nil)
                     .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(Theme.background.opacity(0.45))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .transition(.opacity)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(8)
-            .background(Theme.background.opacity(0.45))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .background(expanded ? Theme.background.opacity(0.2) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+/// 回复预览组：折叠态前 12 行截断，可展开全文（完整渲染由最终 assistant 气泡承担）。
+private struct AnswerPreviewRow: View {
+    let segments: [LiveItem]
+
+    @State private var expanded = false
+
+    private var chars: Int { segments.reduce(0) { $0 + $1.text.count } }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(segments) { seg in
+                    Text(seg.text)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Theme.textPrimary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(expanded ? nil : 12)
+                        .truncationMode(.tail)
+                }
+            }
+            if chars > 300 {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { expanded.toggle() }
+                } label: {
+                    Text(expanded ? "收起回复预览" : "展开全部 \(chars) 字")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(Theme.primary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+/// 单条活动行：思考/工具/转向/子代理/待办 五类形态。
+private struct LiveItemRow: View {
+    let item: LiveItem
+
+    var body: some View {
+        switch item.kind {
+        case .think:
+            // 正常路径走 ThinkGroupView 分组渲染；此分支为兜底（未分组单条）
+            ThinkSegmentRow(item: item, label: nil, running: false)
 
         case .answer:
-            Text(item.text)
-                .font(.system(size: 12))
-                .foregroundStyle(Theme.textPrimary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .lineLimit(12)
-                .truncationMode(.tail)
+            // 正常路径走 AnswerPreviewRow 分组渲染；此分支为兜底
+            AnswerPreviewRow(segments: [item])
 
         case .tool:
             LiveToolRow(item: item)
