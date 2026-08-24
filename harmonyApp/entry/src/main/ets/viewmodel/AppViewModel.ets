@@ -174,6 +174,20 @@ export class AppViewModel {
     this.engine.applyModel(provider, model, cleanEffort);
   }
 
+  /** 当前激活会话（无会话或不匹配时 null） */
+  currentSession(): SessionUi | null {
+    const id = this.state.activeSessionId;
+    if (id === null) {
+      return null;
+    }
+    for (const s of this.state.sessions) {
+      if (s.id === id) {
+        return s;
+      }
+    }
+    return null;
+  }
+
   /** 模型选择器数据源（已配置 key 的 provider 列表） */
   usableProviders(): ProviderConfig[] {
     return ConfigService.get().listUsableProviders();

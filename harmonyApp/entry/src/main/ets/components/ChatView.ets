@@ -536,7 +536,7 @@ export struct ChatView {
                   .onClick(() => {
                     // 选模型即生效，effort 保留当前值，收起面板
                     this.viewModel.setSessionModel(p.provider, model,
-                      this.viewModel.state.currentSession?.effort ?? '');
+                      this.viewModel.currentSession()?.effort ?? '');
                     this.showModelPicker = false;
                   })
                 }, (model: string) => p.provider + '/' + model)
@@ -573,7 +573,7 @@ export struct ChatView {
               .borderRadius(8)
               .onClick(() => {
                 // 思考模式独立切换，保留当前模型不变
-                const s = this.viewModel.state.currentSession;
+                const s = this.viewModel.currentSession();
                 if (s) {
                   this.viewModel.setSessionModel(s.provider, s.model, opt.value ?? '');
                 }
