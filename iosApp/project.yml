@@ -9,12 +9,12 @@ name: Harnest
 options:
   bundleIdPrefix: com.harnest
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "17.0"
   createIntermediateGroups: true
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
 targets:
   Harnest:
     type: application
@@ -34,6 +34,7 @@ targets:
           UIApplicationSupportsMultipleScenes: false
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSAppTransportSecurity:

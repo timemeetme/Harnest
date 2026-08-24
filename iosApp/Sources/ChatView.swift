@@ -175,16 +175,16 @@ struct ChatView: View {
             .onAppear {
                 scrollToBottom(proxy, animated: false)
             }
-            .onChange(of: app.currentSession?.id) { _ in
+            .onChange(of: app.currentSession?.id) {
                 scrollToBottom(proxy, animated: false)
             }
-            .onChange(of: app.currentSession?.messages.count) { _ in
+            .onChange(of: app.currentSession?.messages.count) {
                 scrollToBottom(proxy)
             }
-            .onChange(of: app.liveItems.count) { _ in
+            .onChange(of: app.liveItems.count) {
                 scrollToBottom(proxy)
             }
-            .onChange(of: app.liveItems.reduce(0) { $0 + $1.text.count }) { _ in
+            .onChange(of: app.liveItems.reduce(0) { $0 + $1.text.count }) {
                 scrollToBottom(proxy)
             }
             .onTapGesture { inputFocused = false }
@@ -822,7 +822,7 @@ struct LiveActivityPanel: View {
             .onAppear {
                 if live { expanded = true }
             }
-            .onChange(of: live ? app.busy : false) { busy in
+            .onChange(of: live ? app.busy : false) { _, busy in
                 // 回合结束自动折叠（延迟 0.6s 避免闪烁）
                 if !busy && expanded {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {

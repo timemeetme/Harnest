@@ -219,7 +219,7 @@ final class DeviceBridge {
         if op == "list" {
             var arr: [[String: Any]] = []
             arr.append(["name": "contacts", "granted": CNContactStore.authorizationStatus(for: .contacts) == .authorized])
-            arr.append(["name": "calendar", "granted": EKEventStore.authorizationStatus(for: .event) == .authorized])
+            arr.append(["name": "calendar", "granted": EKEventStore.authorizationStatus(for: .event) == .fullAccess])
             let loc = CLLocationManager().authorizationStatus
             arr.append(["name": "location", "granted": loc == .authorizedAlways || loc == .authorizedWhenInUse])
             let mic: Bool
@@ -269,7 +269,7 @@ final class DeviceBridge {
                 }
             case "calendar":
                 granted = await withCheckedContinuation { cont in
-                    EKEventStore().requestAccess(to: .event) { ok, _ in cont.resume(returning: ok) }
+                    EKEventStore().requestFullAccessToEvents { ok, _ in cont.resume(returning: ok) }
                 }
             default:
                 return ["ok": false, "error": "unknown permission: \(name)"]
@@ -418,7 +418,10 @@ final class DeviceBridge {
             case .unplugged: batteryState = "unplugged"
             default: batteryState = "unknown"
             }
-            let screen = UIScreen.main.bounds
+            let windowScene = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first
+            let screen = windowScene?.screen
             return [
                 "batteryLevel": batteryLevel,
                 "batteryState": batteryState,
@@ -426,7 +429,7 @@ final class DeviceBridge {
                 "model": device.model,
                 "name": device.name,
                 "idfv": device.identifierForVendor?.uuidString ?? "",
-                "screen": "\(Int(screen.width))x\(Int(screen.height)) @\(Int(UIScreen.main.scale))x",
+                "screen": screen.map { "\(Int($0.bounds.width))x\(Int($0.bounds.height)) @\(Int($0.scale))x" } ?? "unknown",
             ]
         }
         let free = ((try? AppPaths.baseDir.resourceValues(forKeys: [.volumeAvailableCapacityKey]))?.volumeAvailableCapacity ?? 0)
