@@ -76,6 +76,15 @@ gh run list --limit 3
 gh run view <run-id> --log-failed | Select-String 'error:' | Sort-Object -Unique   # 抓编译错误清单
 
 # Harmony/真机：hdc（Harmony 设备）在 PATH；装机用 HarmonyOS Studio 侧的 DevEco 工具链
+
+# transpiler 重新打包 harness.js 并分发三端（2026-08-24 验证，node v24）
+cd tools\harness-transpiler; node build.mjs; node patch.mjs   # 产物 output\harness.js；esbuild 把中文转 \uXXXX 转义，grep 中文搜不到是正常的
+node check-quickjs-compat.mjs                                  # QuickJS 兼容门禁
+cd ..\..   # 回根目录分发：
+Copy-Item tools\harness-transpiler\output\harness.js iosApp\Resources\harness.js -Force
+Copy-Item tools\harness-transpiler\output\harness.js androidApp\app\src\main\assets\harness.js -Force
+Copy-Item tools\harness-transpiler\output\harness.js harmonyApp\entry\src\main\resources\rawfile\harness.js -Force
+# Get-FileHash 四份对比确认一致；build.mjs 会把 harness-entry.ts 拷进内核子模块 headless 目录（子模块改动勿提交）
 ```
 
 ## 已知陷阱（重要，勿重复踩）
@@ -100,7 +109,7 @@ gh run view <run-id> --log-failed | Select-String 'error:' | Sort-Object -Unique
     - 实例方法闭包里调静态方法必须 `Self.` 前缀；`Button(action:)` 签名是 `() -> Void`，带默认参方法要写 `Button(action: { submit() })`
 11. **xcodegen 工程名链**：project.yml `name: Harnest` → 生成 `Harnest.xcodeproj`。CI 里 `xcodebuild -project`、`-archivePath`、artifact 路径必须全部匹配该名；archive 后 .app 位于 `build/<name>.xcarchive/Products/Applications/`，**不是** `build/Release-iphoneos/`
 12. **Harmony CI 三坑**（418e7df/19a355b 修复）：Node 20 会挂需 22；`capability-manual.ts` 是 transpiler 构建源必须 git track（.gitignore 误伤过）；hvigor 打包步骤 best-effort（无签名证书，失败不阻塞）
-13. **会话中断丢修改**：TRAE 会话上下文丢失恢复后，先前已"写入文件"的修改可能部分丢失——恢复后必须 `git diff` 与错误清单逐条核对再提交
+13. **会话中断丢修改**：TRAE 会话上下文丢失恢复后，先前已"写入文件"的修改可能部分丢失——恢复后必须 `git diff` 与错误清单逐条核对再提交。**变体（2026-08-24 实测）：同一文件的多处编辑禁止并行调用编辑工具——并行写入互相覆盖，仅最后执行的那处存活（三处并行编辑只活了一处）；必须串行逐处编辑并逐处验证落盘**
 14. **max-tokens 截断三症状链**（73efc45 修复）：深度思考计入 DeepSeek `max_tokens` 输出额度，难问题思考中途耗尽 → API `finish_reason:"length"` → 内核 `reason={kind:'max-tokens'}`（**无 error 字段**）→ 三端宿主 describeReason 只查 `reason.error` 落"模型未返回内容"默认文案；同时内核截断时丢 tool-call blocks（UI 显示 0 步）、think 显示 slice(0,8000) 封顶。宿主 buildEngineConfig/refreshProfiles 均**未传 maxTokens**，内核 buildConnection 兜底 8192。修复：内核 chat() 补 max-tokens 文案 + deepseek reasoner 系模型模型级 maxTokens=65536（模型级覆盖 connection 级，链路 `configured?.maxTokens ?? connection.maxTokens`）+ 三端宿主兜底。新增 reason kind 处理时记得它不一定带 error 字段
 
 ## 环境事实
@@ -111,15 +120,16 @@ gh run view <run-id> --log-failed | Select-String 'error:' | Sort-Object -Unique
 - `.trae/` 未被 gitignore（本文件可提交共享）；`iosApp/*.xcodeproj`、`build/`、DerivedData 已忽略
 - `kernel/deepseek-harness` 子模块在 Windows 机常有本地工作区改动（kernel.ps1 同步产物），提交父仓库时勿顺手带上
 
-## 验证状态快照（2026-08-22/23）
+## 验证状态快照（2026-08-22/24）
 
-- ✅ **CI 三端 workflow 全绿**（第 8 轮 393558f 验证）：Build Harmony 2m47s / Build Android 3m7s / Build iOS 6m50s
+- ✅ **CI 三端 workflow 全绿**（73efc45193 验证）：Build Harmony 2m54s / Build Android 3m43s / Build iOS 11m16s
 - ✅ iOS CI 产物：`.app` bundle（~785KB，可下载后 `codesign -f -s -` ad-hoc 装机）+ XCFramework（~13.8MB）
 - ✅ XCTest **14/14 通过**（Mac，EngineBridgeTests 6 + LocalEngineFlowTests 4 + ProvidersCatalogTests 4，iPhone 17 Pro 模拟器）
 - ✅ iOS Debug + Release 构建通过（Mac 本地 + CI 双验证）
 - ✅ `:shared:iosSimulatorArm64Test` 通过；XCFramework 51MB（ios-arm64 + ios-arm64_x86_64-simulator 双 slice）
-- ✅ Windows `:app:compileDebugKotlin --offline` 通过（393558f 时点）
-- ⬜ 未验证：kernel.sh/kernel.ps1 转译全流程；真机回归 NO_ADAPTER 修复（清空 deepseek key 后重开旧会话应回落默认 provider 不报错）
+- ✅ Windows `:app:compileDebugKotlin --offline` 通过（73efc45193 时点复验，21s）
+- ✅ Windows transpiler 打包链路（73efc45193）：build.mjs + patch.mjs + check-quickjs-compat PASS + 三端分发 SHA256 一致
+- ⬜ 未验证：kernel.sh/kernel.ps1 内核子模块管理命令；真机回归 NO_ADAPTER 修复（清空 deepseek key 后重开旧会话应回落默认 provider 不报错）；真机回归 max-tokens 修复（deepseek-reasoner 问难题应完整出答案不截断）
 
 ## CI 修复史（8 轮迭代，2026-08-22，Windows 端）
 
@@ -151,3 +161,4 @@ Mac 端后续（2026-08-23）：c5d5d82e71（ConfigService 缓存回写值语义
 - 2026-08-23 Windows 端融合（基线 7500cc0924）。沉淀：CI 8 轮修复史与三端全绿结论、iOS artifact 产物路径、陷阱 9-13（NO_ADAPTER 挂载校验、Swift 8 类编译错误、xcodegen 工程名链、Harmony CI 三坑、会话中断丢修改）、Windows 机验证命令段、双机开发环境事实
 - 2026-08-23 维护协议新增第 3 条（基线 f2b48c5489）：会话内进展自动更新记忆并推送 GitHub（用户确认采用"仅会话内"模式，不建定时任务）
 - 2026-08-23 协议第 1 条升级（基线 c36c6626f2）：开工前先 pull 记忆文件，形成"pull → 干活 → push"闭环，双机 TRAE 会话同等生效
+- 2026-08-24 Windows 端（基线 73efc45193）：修复鸿蒙"0步 8000字思考→模型未返回内容" bug（max-tokens 截断三症状链，见陷阱 14）；CI 三端复绿（iOS 11m16s）；沉淀 transpiler 打包分发命令段；本会话两次踩中陷阱 13（内核 chat 文案、记忆文件 3 处改动均 diff 核对后发现丢失重做）
