@@ -3,7 +3,7 @@
 > 本文件是 TRAE 项目记忆：每次会话自动加载，新会话开工前先读这里，避免重复踩坑。
 > 由 TRAE 生成并按项目进展自动维护：每次会话发生实质变更（新提交/新结论/新陷阱）时由当前会话直接更新。人工修改请同步更新「维护日志」。
 >
-> 最后同步 HEAD: 7500cc0924 （2026-08-23，双机融合）
+> 最后同步 HEAD: 73efc45193 （2026-08-24，Windows 机）
 
 ## 项目身份
 
@@ -101,6 +101,7 @@ gh run view <run-id> --log-failed | Select-String 'error:' | Sort-Object -Unique
 11. **xcodegen 工程名链**：project.yml `name: Harnest` → 生成 `Harnest.xcodeproj`。CI 里 `xcodebuild -project`、`-archivePath`、artifact 路径必须全部匹配该名；archive 后 .app 位于 `build/<name>.xcarchive/Products/Applications/`，**不是** `build/Release-iphoneos/`
 12. **Harmony CI 三坑**（418e7df/19a355b 修复）：Node 20 会挂需 22；`capability-manual.ts` 是 transpiler 构建源必须 git track（.gitignore 误伤过）；hvigor 打包步骤 best-effort（无签名证书，失败不阻塞）
 13. **会话中断丢修改**：TRAE 会话上下文丢失恢复后，先前已"写入文件"的修改可能部分丢失——恢复后必须 `git diff` 与错误清单逐条核对再提交
+14. **max-tokens 截断三症状链**（73efc45 修复）：深度思考计入 DeepSeek `max_tokens` 输出额度，难问题思考中途耗尽 → API `finish_reason:"length"` → 内核 `reason={kind:'max-tokens'}`（**无 error 字段**）→ 三端宿主 describeReason 只查 `reason.error` 落"模型未返回内容"默认文案；同时内核截断时丢 tool-call blocks（UI 显示 0 步）、think 显示 slice(0,8000) 封顶。宿主 buildEngineConfig/refreshProfiles 均**未传 maxTokens**，内核 buildConnection 兜底 8192。修复：内核 chat() 补 max-tokens 文案 + deepseek reasoner 系模型模型级 maxTokens=65536（模型级覆盖 connection 级，链路 `configured?.maxTokens ?? connection.maxTokens`）+ 三端宿主兜底。新增 reason kind 处理时记得它不一定带 error 字段
 
 ## 环境事实
 
