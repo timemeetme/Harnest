@@ -199,14 +199,27 @@ final class AppStore: ObservableObject {
 
     /// 当前会话切换模型+思考强度（k1：effort nil = 跟随服务端默认）。
     func applyModel(provider: String, model: String, effort: String? = nil) {
-        guard var s = currentSession else { return }
         let clean = ReasoningEfforts.isValid(effort) ? effort : nil
-        s.provider = provider
-        s.model = model
-        s.effort = clean
-        s.updatedAt = nowMs()
-        store.upsert(s)
-        currentSession = s
+        if var s = currentSession {
+            s.provider = provider
+            s.model = model
+            s.effort = clean
+            s.updatedAt = nowMs()
+            store.upsert(s)
+            currentSession = s
+        } else {
+            // 无当前会话时自动创建一个（用户在模型选择器选模型但还没会话）
+            let record = SessionRecord(
+                id: SessionStore.newId(),
+                title: "新会话",
+                provider: provider,
+                model: model,
+                effort: clean
+            )
+            store.upsert(record)
+            sessions = store.loadAll()
+            currentSession = record
+        }
         config.setLastSelection(provider: provider, model: model, effort: clean)
         engine.setModel(provider: provider, model: model, effort: clean)
         modelRev += 1

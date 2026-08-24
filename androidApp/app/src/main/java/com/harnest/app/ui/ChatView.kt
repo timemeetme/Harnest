@@ -909,8 +909,8 @@ private fun ModelPicker(
     onClose: () -> Unit,
 ) {
     val c = harnessColors()
-    // 二级钻取：null = 模型列表；非 null = 该模型的思考模式面板
-    var drill by remember { mutableStateOf<Pair<String, String>?>(null) }
+    // 两个并列 Tab：模型 / 思考模式
+    var tab by remember { mutableStateOf(0) } // 0=模型, 1=思考模式
     Column(
         Modifier
             .fillMaxWidth()
@@ -919,15 +919,27 @@ private fun ModelPicker(
             .verticalScroll(rememberScrollState())
             .padding(bottom = 8.dp),
     ) {
-        val target = drill
-        if (target == null) {
-            Row(
-                Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 12.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("选择模型", color = c.textHint, fontSize = 11.sp, modifier = Modifier.weight(1f))
-                Text("收起", color = c.textHint, fontSize = 12.sp, modifier = Modifier.clickable(onClick = onClose).padding(6.dp))
+        // 顶部 Tab 切换
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            listOf("模型", "思考模式").forEachIndexed { i, label ->
+                Text(
+                    label,
+                    color = if (tab == i) c.primary else c.textHint,
+                    fontSize = 14.sp,
+                    fontWeight = if (tab == i) FontWeight.Medium else FontWeight.Normal,
+                    modifier = Modifier
+                        .clickable { tab = i }
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                )
             }
+            Spacer(Modifier.weight(1f))
+            Text("收起", color = c.textHint, fontSize = 12.sp, modifier = Modifier.clickable(onClick = onClose).padding(6.dp))
+        }
+        if (tab == 0) {
+            // ── 模型列表 ──
             usableProviders.forEach { (provider, models) ->
                 Text(
                     providerLabel(provider),
@@ -941,9 +953,9 @@ private fun ModelPicker(
                         Modifier
                             .fillMaxWidth()
                             .clickable {
-                                // 选模型即生效（effort 保留当前值），思考模式可后续独立调整
+                                // 选模型即生效（effort 保留当前值），收起面板
                                 onSelect(provider, model, currentEffort)
-                                drill = provider to model
+                                onClose()
                             }
                             .padding(horizontal = 20.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
@@ -956,13 +968,11 @@ private fun ModelPicker(
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
-                            if (selected) {
-                                Text(
-                                    "思考模式：${ReasoningEfforts.label(currentEffort)} ›",
-                                    color = c.textHint,
-                                    fontSize = 11.sp,
-                                )
-                            }
+                            Text(
+                                providerLabel(provider),
+                                color = c.textHint,
+                                fontSize = 10.sp,
+                            )
                         }
                         if (selected) Text("✓", color = c.primary, fontSize = 14.sp)
                     }
@@ -977,36 +987,24 @@ private fun ModelPicker(
                 )
             }
         } else {
-            val (dProvider, dModel) = target
-            Row(
-                Modifier.fillMaxWidth().padding(start = 12.dp, end = 20.dp, top = 12.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("‹ 返回", color = c.primary, fontSize = 13.sp, modifier = Modifier.clickable { drill = null }.padding(vertical = 6.dp))
-                Spacer(Modifier.width(8.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("思考模式", color = c.textPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-                    Text(
-                        "$dProvider / $dModel",
-                        color = c.textHint,
-                        fontSize = 11.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            val onThisModel = dProvider == currentProvider && dModel == currentModel
+            // ── 思考模式列表（独立于模型选择，基于当前会话） ──
             listOf(
                 null to "跟随服务端默认",
                 "off" to "不产出思考，速度最快",
                 "high" to "常规思考",
                 "max" to "深度思考，耗时更长",
             ).forEach { (effortId, desc) ->
-                val selected = onThisModel && currentEffort == effortId
+                val selected = currentEffort == effortId
                 Row(
                     Modifier
                         .fillMaxWidth()
-                        .clickable { onSelect(dProvider, dModel, effortId) }
+                        .clickable {
+                            // 思考模式独立切换，保留当前模型不变
+                            if (currentProvider != null && currentModel != null) {
+                                onSelect(currentProvider, currentModel, effortId)
+                            }
+                            onClose()
+                        }
                         .padding(horizontal = 20.dp, vertical = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {

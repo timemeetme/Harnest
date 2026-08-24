@@ -30,6 +30,7 @@ export struct ChatView {
   @State liveExpanded: Record<string, boolean> = {};
   /** k1 模型选择器二级钻取（'provider/model' 非空时展示思考模式行） */
   @State drillModel: string = '';
+  @State pickerTab: number = 0; // 0=模型, 1=思考模式
   /** k5 提问卡选择态（questionId → 选中 label 列表） */
   @State qSel: Record<string, string[]> = {};
   /** k5 提问卡自由文本（questionId → 输入） */
@@ -481,82 +482,113 @@ export struct ChatView {
 
   @Builder
   modelPicker() {
-    Scroll() {
-      Column({ space: 2 }) {
-        ForEach(this.providerList, (p: ProviderConfig) => {
-          Column({ space: 2 }) {
-            Text(this.viewModel.providerLabel(p.provider)).fontSize('11fp')
-              .fontColor(this.theme.textHint)
-              .padding({ top: 8, bottom: 4, left: 12 })
-            ForEach(p.models, (model: string) => {
-              Column({ space: 0 }) {
-                Row() {
-                  Text(model).fontSize('14fp')
-                    .fontColor(this.isActiveModel(p.provider, model)
-                      ? this.theme.primary : this.theme.textPrimary)
-                    .layoutWeight(1)
-                  if (this.isActiveModel(p.provider, model)) {
-                    Text('✓').fontSize('14fp').fontColor(this.theme.primary)
-                  }
-                  // k1 钻取指示
-                  Text(this.drillModel === p.provider + '/' + model ? '▴' : '▾')
-                    .fontSize('10fp').fontColor(this.theme.textHint)
-                    .margin({ left: 6 })
-                }
-                .width('100%')
-                .padding({ left: 20, right: 12, top: 9, bottom: 9 })
-                .borderRadius(8)
-                .onClick(() => {
-                  // 选模型即生效（effort 保留当前值），思考模式可后续独立调整
-                  this.viewModel.setSessionModel(p.provider, model,
-                    this.viewModel.state.currentSession?.effort ?? '');
-                  // 点击模型 → 展开/收起思考模式二级选项
-                  this.drillModel = this.drillModel === p.provider + '/' + model
-                    ? '' : p.provider + '/' + model;
-                })
+    Column({ space: 0 }) {
+      // 顶部 Tab 切换：模型 / 思考模式
+      Row({ space: 0 }) {
+        Text('模型')
+          .fontSize('14fp')
+          .fontColor(this.pickerTab === 0 ? this.theme.primary : this.theme.textHint)
+          .fontWeight(this.pickerTab === 0 ? FontWeight.Medium : FontWeight.Regular)
+          .layoutWeight(1)
+          .textAlign(TextAlign.Center)
+          .padding({ top: 10, bottom: 10 })
+          .onClick(() => { this.pickerTab = 0; })
+        Text('思考模式')
+          .fontSize('14fp')
+          .fontColor(this.pickerTab === 1 ? this.theme.primary : this.theme.textHint)
+          .fontWeight(this.pickerTab === 1 ? FontWeight.Medium : FontWeight.Regular)
+          .layoutWeight(1)
+          .textAlign(TextAlign.Center)
+          .padding({ top: 10, bottom: 10 })
+          .onClick(() => { this.pickerTab = 1; })
+      }
+      .width('100%')
 
-                // k1 思考模式钻取层
-                if (this.drillModel === p.provider + '/' + model) {
-                  Column({ space: 0 }) {
-                    ForEach(this.viewModel.effortOptions(), (opt: EffortOption) => {
-                      Row({ space: 6 }) {
-                        Column({ space: 1 }) {
-                          Text(opt.label).fontSize('13fp')
-                            .fontColor(this.isActiveEffort(opt.value)
-                              ? this.theme.primary : this.theme.textPrimary)
-                          Text(opt.hint).fontSize('9fp').fontColor(this.theme.textHint)
-                        }
-                        .alignItems(HorizontalAlign.Start)
-                        .layoutWeight(1)
-                        if (this.isActiveEffort(opt.value)) {
-                          Text('✓').fontSize('12fp').fontColor(this.theme.primary)
-                        }
-                      }
-                      .width('100%')
-                      .padding({ left: 32, right: 12, top: 7, bottom: 7 })
-                      .borderRadius(8)
-                      .onClick(() => {
-                        this.viewModel.setSessionModel(p.provider, model, opt.value ?? '');
-                        this.drillModel = '';
-                        this.showModelPicker = false;
-                      })
-                    }, (opt: EffortOption) => p.provider + '/' + model + '/' + opt.label)
+      Divider().color(this.theme.divider)
+
+      if (this.pickerTab === 0) {
+        // ── 模型列表 ──
+        Scroll() {
+          Column({ space: 2 }) {
+            ForEach(this.providerList, (p: ProviderConfig) => {
+              Column({ space: 2 }) {
+                Text(this.viewModel.providerLabel(p.provider)).fontSize('11fp')
+                  .fontColor(this.theme.textHint)
+                  .padding({ top: 8, bottom: 4, left: 12 })
+                ForEach(p.models, (model: string) => {
+                  Row() {
+                    Column({ space: 1 }) {
+                      Text(model).fontSize('14fp')
+                        .fontColor(this.isActiveModel(p.provider, model)
+                          ? this.theme.primary : this.theme.textPrimary)
+                      Text(this.viewModel.providerLabel(p.provider)).fontSize('10fp')
+                        .fontColor(this.theme.textHint)
+                    }
+                    .alignItems(HorizontalAlign.Start)
+                    .layoutWeight(1)
+                    if (this.isActiveModel(p.provider, model)) {
+                      Text('✓').fontSize('14fp').fontColor(this.theme.primary)
+                    }
                   }
                   .width('100%')
+                  .padding({ left: 20, right: 12, top: 9, bottom: 9 })
                   .borderRadius(8)
-                  .backgroundColor(this.theme.surface)
+                  .onClick(() => {
+                    // 选模型即生效，effort 保留当前值，收起面板
+                    this.viewModel.setSessionModel(p.provider, model,
+                      this.viewModel.state.currentSession?.effort ?? '');
+                    this.showModelPicker = false;
+                  })
+                }, (model: string) => p.provider + '/' + model)
+              }
+              .width('100%')
+            }, (p: ProviderConfig) => p.provider)
+          }
+          .width('100%')
+          .padding({ bottom: 8, top: 2 })
+        }
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .constraintSize({ maxHeight: 300 })
+      } else {
+        // ── 思考模式列表（独立于模型选择，基于当前会话） ──
+        Scroll() {
+          Column({ space: 2 }) {
+            ForEach(this.viewModel.effortOptions(), (opt: EffortOption) => {
+              Row({ space: 6 }) {
+                Column({ space: 1 }) {
+                  Text(opt.label).fontSize('14fp')
+                    .fontColor(this.isActiveEffort(opt.value)
+                      ? this.theme.primary : this.theme.textPrimary)
+                  Text(opt.hint).fontSize('10fp').fontColor(this.theme.textHint)
+                }
+                .alignItems(HorizontalAlign.Start)
+                .layoutWeight(1)
+                if (this.isActiveEffort(opt.value)) {
+                  Text('✓').fontSize('14fp').fontColor(this.theme.primary)
                 }
               }
               .width('100%')
-            }, (model: string) => p.provider + '/' + model)
+              .padding({ left: 20, right: 12, top: 10, bottom: 10 })
+              .borderRadius(8)
+              .onClick(() => {
+                // 思考模式独立切换，保留当前模型不变
+                const s = this.viewModel.state.currentSession;
+                if (s) {
+                  this.viewModel.setSessionModel(s.provider, s.model, opt.value ?? '');
+                }
+                this.showModelPicker = false;
+              })
+            }, (opt: EffortOption) => String(opt.value ?? 'default'))
           }
           .width('100%')
-        }, (p: ProviderConfig) => p.provider)
+          .padding({ bottom: 8, top: 2 })
+        }
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .constraintSize({ maxHeight: 300 })
       }
-      .width('100%')
-      .padding({ bottom: 8, top: 2 })
     }
-    .scrollBar(BarState.Off)
     .width('100%')
     .constraintSize({ maxHeight: 340 })
     .borderRadius({ bottomLeft: 16, bottomRight: 16 })

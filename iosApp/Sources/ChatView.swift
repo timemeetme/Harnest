@@ -1295,15 +1295,19 @@ private struct SessionRow: View {
     }
 }
 
-// ── model picker（两级：模型列表 → effort 钻取） ─────────────
+// ── model picker（模型 / 思考模式 两个并列 Tab） ─────────────
 
 struct ModelPickerView: View {
 
     @EnvironmentObject var app: AppStore
     @Environment(\.dismiss) private var dismiss
 
-    /// 非空 = 已进入 effort 钻取层
-    @State private var drill: DrillTarget?
+    @State private var tab: PickerTab = .model
+
+    enum PickerTab: String, CaseIterable {
+        case model = "模型"
+        case effort = "思考模式"
+    }
 
     struct ModelRow: Identifiable {
         var id: String { "\(provider)/\(model)" }
@@ -1317,12 +1321,6 @@ struct ModelPickerView: View {
         let provider: String
         let label: String
         let models: [ModelRow]
-    }
-
-    struct DrillTarget: Identifiable {
-        var id: String { "\(provider)/\(model)" }
-        let provider: String
-        let model: String
     }
 
     private var groups: [ProviderGroup] {
@@ -1343,61 +1341,50 @@ struct ModelPickerView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                if let d = drill {
+            // 顶部 Tab 切换
+            HStack(spacing: 0) {
+                ForEach(PickerTab.allCases, id: \.self) { t in
                     Button {
-                        withAnimation { drill = nil }
+                        withAnimation { tab = t }
                     } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Theme.primary)
-                            .frame(width: 32, height: 32)
+                        Text(t.rawValue)
+                            .font(.system(size: 15, weight: tab == t ? .semibold : .regular))
+                            .foregroundStyle(tab == t ? Theme.primary : Theme.textHint)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
                     }
-                    .accessibilityLabel("返回模型列表")
-                    Text("思考强度 · \(d.model)")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
-                        .lineLimit(1)
-                } else {
-                    Text("选择模型")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(Theme.textPrimary)
+                    .buttonStyle(.plain)
                 }
-                Spacer()
-                Button("完成") { dismiss() }
-                    .font(.system(size: 14))
-                    .foregroundStyle(Theme.primary)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-
             Divider().overlay(Theme.border)
 
-            if let d = drill {
-                effortPanel(d)
-            } else {
-                modelList
-            }
-        }
-        .background(Theme.surface)
-    }
-
-    private var modelList: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 2) {
-                ForEach(groups) { group in
-                    Text(group.label)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(Theme.textHint)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 12)
-                    ForEach(group.models) { row in
-                        modelRow(row)
-                    }
+            ScrollView {
+                if tab == .model {
+                    modelList
+                } else {
+                    effortList
                 }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
+        }
+        .background(Theme.surface)
+    }
+
+    // ── 模型列表 ──
+
+    private var modelList: some View {
+        LazyVStack(alignment: .leading, spacing: 2) {
+            ForEach(groups) { group in
+                Text(group.label)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.textHint)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                ForEach(group.models) { row in
+                    modelRow(row)
+                }
+            }
         }
     }
 
@@ -1405,25 +1392,18 @@ struct ModelPickerView: View {
         let selected = app.currentSession?.provider == row.provider
             && app.currentSession?.model == row.model
         return Button {
-            // 选模型即生效（effort 保留当前值或 nil 默认），思考模式可后续独立调整
+            // 选模型即生效，effort 保留当前值；sheet 自动收起
             app.applyModel(provider: row.provider, model: row.model, effort: app.currentSession?.effort)
-            withAnimation { drill = DrillTarget(provider: row.provider, model: row.model) }
+            dismiss()
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(row.model)
                         .font(.system(size: 14, weight: selected ? .semibold : .regular))
                         .foregroundStyle(selected ? Theme.primary : Theme.textPrimary)
-                    HStack(spacing: 4) {
-                        Text(row.providerLabel)
-                            .font(.system(size: 10))
-                            .foregroundStyle(Theme.textHint)
-                        if selected, let e = app.currentSession?.effort {
-                            Text("· \(ReasoningEfforts.label(e))")
-                                .font(.system(size: 10))
-                                .foregroundStyle(Theme.primary)
-                        }
-                    }
+                    Text(row.providerLabel)
+                        .font(.system(size: 10))
+                        .foregroundStyle(Theme.textHint)
                 }
                 Spacer()
                 if selected {
@@ -1431,9 +1411,6 @@ struct ModelPickerView: View {
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(Theme.primary)
                 }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11))
-                    .foregroundStyle(Theme.textHint)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -1443,22 +1420,17 @@ struct ModelPickerView: View {
         .buttonStyle(.plain)
     }
 
-    /// effort 钻取层：nil=跟随服务端默认 / off / high / max。
-    private func effortPanel(_ d: DrillTarget) -> some View {
-        let current = (app.currentSession?.provider == d.provider
-                       && app.currentSession?.model == d.model)
-            ? app.currentSession?.effort
-            : nil
-        return ScrollView {
-            VStack(alignment: .leading, spacing: 6) {
-                effortRow(d, effort: nil, label: ReasoningEfforts.label(nil),
-                          caption: "跟随服务端默认", selected: current == nil)
-                ForEach(ReasoningEfforts.ids, id: \.self) { e in
-                    effortRow(d, effort: e, label: ReasoningEfforts.label(e),
-                              caption: effortCaption(e), selected: current == e)
-                }
+    // ── 思考模式列表（独立于模型选择，基于当前会话） ──
+
+    private var effortList: some View {
+        let current = app.currentSession?.effort
+        return VStack(alignment: .leading, spacing: 6) {
+            effortRow(effort: nil, label: ReasoningEfforts.label(nil),
+                      caption: "跟随服务端默认", selected: current == nil)
+            ForEach(ReasoningEfforts.ids, id: \.self) { e in
+                effortRow(effort: e, label: ReasoningEfforts.label(e),
+                          caption: effortCaption(e), selected: current == e)
             }
-            .padding(12)
         }
     }
 
@@ -1471,9 +1443,12 @@ struct ModelPickerView: View {
         }
     }
 
-    private func effortRow(_ d: DrillTarget, effort: String?, label: String, caption: String, selected: Bool) -> some View {
+    private func effortRow(effort: String?, label: String, caption: String, selected: Bool) -> some View {
         Button {
-            app.applyModel(provider: d.provider, model: d.model, effort: effort)
+            // 思考模式独立切换，保留当前模型不变
+            if let s = app.currentSession {
+                app.applyModel(provider: s.provider, model: s.model, effort: effort)
+            }
             dismiss()
         } label: {
             HStack {
