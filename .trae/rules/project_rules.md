@@ -3,7 +3,7 @@
 > 本文件是 TRAE 项目记忆：每次会话自动加载，新会话开工前先读这里，避免重复踩坑。
 > 由 TRAE 生成并按项目进展自动维护：每次会话发生实质变更（新提交/新结论/新陷阱）时由当前会话直接更新。人工修改请同步更新「维护日志」。
 >
-> 最后同步 HEAD: 2922a9650a （2026-08-24，Mac 机：Xcode 27 beta 清零 31 处 Swift 6 并发检查告警 + XCTest 14/14；前一基线 8c78bd6e89 为 Windows 机 maxTokens 配置链）
+> 最后同步 HEAD: 23130e84fa （2026-08-25，Mac 机：Xcode 27 真机构建清零 12 处 API 弃用警告 + 部署目标 16→17；前一基线 2922a9650a 为 Swift 6 并发诊断修复）
 
 ## 项目身份
 
@@ -121,10 +121,17 @@ Copy-Item tools\harness-transpiler\output\harness.js harmonyApp\entry\src\main\r
     - MainActor 隔离属性（`UIDevice.current` / `UIScreen.main`）在非隔离 async 上下文访问 → 聚合进单个 `MainActor.run` 返回字典，注意接结果要 `var` 才能后续下标赋值
     - withLock 闭包体若是单表达式且该表达式有返回值（如 `dict.removeValue`），返回值会被推断为闭包返回类型带出外层调用 → unused 告警，显式 `_ =` 丢弃
     - 修完必须 **clean build** 验证清零：增量构建跳过未改文件的编译，告警不重现会误判已修复
+16. **Xcode 27 beta SDK API 弃用警告**（23130e84fa 修复，2026-08-25 Mac）：Xcode 27 beta 的 SDK 把一批旧 API 标记为 deprecated，真机（arm64 device）构建时暴露（模拟器构建之前未暴露）。部署目标提升到 17.0 后可消除 iOS 17 标记的弃用：
+    - `onChange(of:perform:)` 单参数闭包（iOS 17 弃用）→ 零参数 `onChange(of:) { }`（不需要新旧值时）或两参数 `onChange(of:) { old, new in }`（需要新值时）
+    - `EKEventStore.requestAccess(to:completion:)`（iOS 17 弃用）→ `requestFullAccessToEvents(withCompletion:)`；`.authorized` → `.fullAccess`
+    - `UIScreen.main`（iOS 26 弃用）→ `UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first?.screen`（注意 fallback 不能再引用 `UIScreen.main`，用 `screen.map { ... } ?? "unknown"` 处理 nil）
+    - `Text +` 运算符（iOS 26 弃用）：Markdown 渲染场景拼接不同样式 Text（bold/italic/strikethrough 修饰符）无 AttributedString 替代路径，实际真机构建未报此警告（可能 SDK 版本差异）
+    - `UISupportedInterfaceOrientations` 缺 PortraitUpsideDown → 补全四个方向
+    - **真机构建验证需 `CODE_SIGNING_ALLOWED=NO`**（免费 Personal Team 签名在命令行会失败，但编译告警不受签名影响）
 
 ## 环境事实
 
-- Mac：iPhone 17 Pro 模拟器；App 容器内 `api_config.json` 首启自动播种 9 个 provider 默认配置
+- Mac：iPhone 17 Pro 模拟器；**真机 MyPhone (iPhone 17 Pro / iPhone18,1 / iOS 27 beta) 已连接**（UDID 72E02B90-611E-59B0-8B0C-A22B9DB2A6DA）；部署目标 **17.0**（2026-08-25 从 16.0 提升）；App 容器内 `api_config.json` 首启自动播种 9 个 provider 默认配置
 - Mac 测试注入 fake key 后 chat 全链路可达 DeepSeek API 并正确回传 401（说明 JS 内核→网络桥→错误 surfaced 链路通）
 - Windows：Harmony 真机可用（hdc）；Android 真机/模拟器可用；iOS 无法本机编译（无 macOS），全靠 CI（macos-14 runner，XcodeGen + xcodebuild，产物 .app + XCFramework）
 - `.trae/` 未被 gitignore（本文件可提交共享）；`iosApp/*.xcodeproj`、`build/`、DerivedData 已忽略
@@ -176,3 +183,4 @@ Mac 端后续（2026-08-23）：c5d5d82e71（ConfigService 缓存回写值语义
 - 2026-08-24 Windows 端（8c78bd6e89）：打通 provider 级 maxTokens 用户配置链（内核 buildConnection 用户值跳过 reasoner 硬编码 + 三端 ConfigService 持久化/透传/导入导出 + 三端 provider 编辑页输入框，27 处改动全部串行编辑零丢失——陷阱 13 变体防护生效）；陷阱 14 修订补充决定链；Android 编译 4s 通过、三端分发 SHA256 一致
 - 2026-08-24 Mac 端拉取复验（8c78bd6e89）：pull --rebase 首次遭遇双机记忆文件冲突（双方维护日志并行追加），按协议合并双方条目解决；iOS 侧变更影响评估（harness.js/AppStore/ConfigService/SettingsView 共 4 文件，setConfig 新参带默认值向后兼容，project.yml 未变免 xcodegen）；本地复验 Debug+Release 构建 + XCTest 14/14 全通过，maxTokens 功能在 Mac 本地首次编译验证成功
 - 2026-08-24 Mac 端 Xcode 27 beta 适配（2922a9650a）：清零 IDE 31 issue（编译口径 34 处告警）——四类 Swift 6 并发诊断（noasync 锁 ×23 / @Sendable 捕获 / MainActor 隔离 / unused 结果，见陷阱 15），涉及 LocalEngine/HarnessEngine/HttpBridge/DeviceBridge 共 4 文件 8 处编辑（全部串行，陷阱 13 防护生效）；环境变更：Mac 升级 macOS 27 + Xcode-beta.app 27A5237l 成为唯一 Xcode（xcode-select 指向 CommandLineTools 需 DEVELOPER_DIR）；clean build 0 警告 + XCTest 14/14 复验通过
+- 2026-08-25 Mac 端真机适配（23130e84fa）：清零真机构建 12 处 API 弃用警告（见陷阱 16）——部署目标 16.0→17.0 + onChange/EKEventStore/UIScreen.main 新 API + orientations 补全，涉及 project.yml/Info.plist/ChatView/DeviceBridge 共 4 文件；真机 MyPhone (iPhone 17 Pro/iOS 27 beta) 已连接；真机 clean build（CODE_SIGNING_ALLOWED=NO）0 警告 + XCTest 14/14 通过
