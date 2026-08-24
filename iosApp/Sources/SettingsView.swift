@@ -7,6 +7,7 @@ struct SettingsView: View {
     @EnvironmentObject var app: AppStore
     @AppStorage(AppearanceMode.storageKey) private var appearanceRaw: String = AppearanceMode.system.rawValue
     @State private var importMsg: String?
+    @State private var showFileImporter = false
 
     private var appearance: AppearanceMode {
         AppearanceMode(rawValue: appearanceRaw) ?? .system
@@ -28,6 +29,19 @@ struct SettingsView: View {
             .background(Theme.background)
             .navigationTitle("设置")
             .navigationBarTitleDisplayMode(.inline)
+        }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.json],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                    importFromFile(url: url)
+            case .failure:
+                importMsg = "文件选择失败"
+            }
         }
     }
 
@@ -89,6 +103,9 @@ struct SettingsView: View {
                 ActionRow(icon: "doc.on.clipboard", title: "从剪贴板导入配置", subtitle: "支持 EMM 格式的模型配置 JSON") {
                     importFromClipboard()
                 }
+                ActionRow(icon: "folder.badge.plus", title: "从文件导入配置", subtitle: "选择 .json 配置文件导入") {
+                    showFileImporter = true
+                }
                 ActionRow(icon: "doc.on.doc", title: "复制全部配置到剪贴板", subtitle: "导出为 EMM 格式 JSON") {
                     let json = ConfigService.get().exportConfigJson()
                     UIPasteboard.general.string = json
@@ -117,6 +134,27 @@ struct SettingsView: View {
             app.toast("已导入 \(count) 个模型服务")
         } else {
             importMsg = errors.first ?? "导入失败：剪贴板内容不是有效的配置 JSON"
+        }
+    }
+
+    private func importFromFile(url: URL) {
+        guard url.startAccessingSecurityScopedResource() else {
+            importMsg = "无法访问文件"
+            return
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
+        guard let data = try? Data(contentsOf: url),
+              let text = String(data: data, encoding: .utf8) else {
+            importMsg = "读取文件失败"
+            return
+        }
+        let (count, errors) = ConfigService.get().importConfigJson(text)
+        if count > 0 {
+            importMsg = "已从文件导入 \(count) 个模型服务配置"
+            app.onConfigChanged()
+            app.toast("已导入 \(count) 个模型服务")
+        } else {
+            importMsg = errors.first ?? "导入失败：文件内容不是有效的配置 JSON"
         }
     }
 
