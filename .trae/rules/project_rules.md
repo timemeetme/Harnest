@@ -3,7 +3,7 @@
 > 本文件是 TRAE 项目记忆：每次会话自动加载，新会话开工前先读这里，避免重复踩坑。
 > 由 TRAE 生成并按项目进展自动维护：每次会话发生实质变更（新提交/新结论/新陷阱）时由当前会话直接更新。人工修改请同步更新「维护日志」。
 >
-> 最后同步 HEAD: 23130e84fa （2026-08-25，Mac 机：Xcode 27 真机构建清零 12 处 API 弃用警告 + 部署目标 16→17；前一基线 2922a9650a 为 Swift 6 并发诊断修复）
+> 最后同步 HEAD: f36ae0b4e2 （2026-08-25，Mac 机：万字思考卡死 + details null 致 iOS 崩溃双修复，见陷阱 17/18；前一基线 23130e84fa 为真机构建弃用警告清零）
 
 ## 项目身份
 
@@ -60,9 +60,9 @@ sh ./gradlew :shared:iosSimulatorArm64Test --no-daemon             # iOS 目标�
 # iOS（先进入 iosApp/；改 project.yml 后必须 xcodegen generate 重新生成工程）
 cd iosApp && xcodegen generate
 xcodebuild build -project Harnest.xcodeproj -scheme Harnest \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'         # Debug
+  -destination 'platform=iOS Simulator,name=iPhone 17e'          # Debug（OS 26.5 起 17 Pro 模拟器没了，用 17e）
 xcodebuild test  -project Harnest.xcodeproj -scheme Harnest \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro'         # 14 个 XCTest
+  -destination 'platform=iOS Simulator,name=iPhone 17e'          # 14 个 XCTest
 # Release 验证：加 -configuration Release
 
 # 内核子模块（首次克隆后需要）
@@ -128,25 +128,31 @@ Copy-Item tools\harness-transpiler\output\harness.js harmonyApp\entry\src\main\r
     - `Text +` 运算符（iOS 26 弃用）：Markdown 渲染场景拼接不同样式 Text（bold/italic/strikethrough 修饰符）无 AttributedString 替代路径，实际真机构建未报此警告（可能 SDK 版本差异）
     - `UISupportedInterfaceOrientations` 缺 PortraitUpsideDown → 补全四个方向
     - **真机构建验证需 `CODE_SIGNING_ALLOWED=NO`**（免费 Personal Team 签名在命令行会失败，但编译告警不受签名影响）
+17. **NSJSONSerialization 顶层 NSNull 崩溃 + JSON null ≠ nil**（f36ae0b4e2 修复，2026-08-25 Mac）：
+    - `JSONSerialization.data(withJSONObject:)` 收到顶层标量/NSNull 抛 `NSInvalidArgumentException` —— **Swift 的 `try?` 接不住 ObjC 异常，进程直接终止**（已实证：顶层 NSNull 复现用户崩溃报文逐字相同）；唯一安全前置检查是 `JSONSerialization.isValidJSONObject(_:)`（不抛异常）
+    - 内核 TS 显式 `null` 字段经 JSON.stringify 保留 → Swift 解析为 **NSNull 实例（非 nil）**：能过 `guard let any`，过不了 `as? String`，最后被当对象序列化 → 崩。触发源：extractDetails 纯对话回合 `todos/usage: null`
+    - 内核侧治本：局部变量用 `undefined` 初始化（`JSON.stringify` 自动**省略** undefined 值的字段，null 则原样输出）；宿主侧兜底：encodeString 加 `if any is NSNull { return nil }` + isValidJSONObject 前置。跨端传 JSON 时**用 undefined 不用 null**，宿主解析统一按"缺 key"处理
+18. **节流相位锁死**：宿主 UI 节流窗口与内核心跳间隔**同频**（均 200ms）时，事件到达抖动可能让每条事件都落进 pending、整轮不刷新。宿主窗口必须**严格小于**内核心跳（本例 150ms < 200ms），且回合收尾（finishRound/序列化前）必须 flush 暂存数据补偿丢帧
 
 ## 环境事实
 
-- Mac：iPhone 17 Pro 模拟器；**真机 MyPhone (iPhone 17 Pro / iPhone18,1 / iOS 27 beta) 已连接**（UDID 72E02B90-611E-59B0-8B0C-A22B9DB2A6DA）；部署目标 **17.0**（2026-08-25 从 16.0 提升）；App 容器内 `api_config.json` 首启自动播种 9 个 provider 默认配置
+- Mac：模拟器 runtime 已更新为 **OS 26.5，iPhone 17 Pro 不在了**（可用：iPhone 17e / iPhone Air，构建测试 destination 用 `iPhone 17e`）；**真机 MyPhone (iPhone 17 Pro / iPhone18,1 / iOS 27 beta) 已连接**（UDID 72E02B90-611E-59B0-8B0C-A22B9DB2A6DA）；部署目标 **17.0**（2026-08-25 从 16.0 提升）；App 容器内 `api_config.json` 首启自动播种 9 个 provider 默认配置
 - Mac 测试注入 fake key 后 chat 全链路可达 DeepSeek API 并正确回传 401（说明 JS 内核→网络桥→错误 surfaced 链路通）
 - Windows：Harmony 真机可用（hdc）；Android 真机/模拟器可用；iOS 无法本机编译（无 macOS），全靠 CI（macos-14 runner，XcodeGen + xcodebuild，产物 .app + XCFramework）
 - `.trae/` 未被 gitignore（本文件可提交共享）；`iosApp/*.xcodeproj`、`build/`、DerivedData 已忽略
 - `kernel/deepseek-harness` 子模块在 Windows 机常有本地工作区改动（kernel.ps1 同步产物），提交父仓库时勿顺手带上
 
-## 验证状态快照（2026-08-22/24）
+## 验证状态快照（2026-08-22/25）
 
 - ✅ **CI 三端 workflow 全绿**（73efc45193 验证）：Build Harmony 2m54s / Build Android 3m43s / Build iOS 11m16s
 - ✅ iOS CI 产物：`.app` bundle（~785KB，可下载后 `codesign -f -s -` ad-hoc 装机）+ XCFramework（~13.8MB）
-- ✅ XCTest **14/14 通过**（Mac，EngineBridgeTests 6 + LocalEngineFlowTests 4 + ProvidersCatalogTests 4，iPhone 17 Pro 模拟器；2026-08-24 于 8c78bd6e89 复验——maxTokens 配置链改动后，`setConfig` 新参带默认值向后兼容无需改测试）
-- ✅ iOS Debug + Release 构建通过（Mac 本地 + CI 双验证；2026-08-24 于 8c78bd6e89 Mac 本地复验双配置）
+- ✅ XCTest **14/14 通过**（Mac，EngineBridgeTests 6 + LocalEngineFlowTests 4 + ProvidersCatalogTests 4；**2026-08-25 于 f36ae0b4e2 复验（iPhone 17e 模拟器）**——万字思考节流 + NSNull 守卫改动后；此前 8c78bd6e89 于 iPhone 17 Pro 复验）
+- ✅ iOS Debug 构建通过（2026-08-25 于 f36ae0b4e2 Mac 本地复验，iPhone 17e）
+- ✅ Mac transpiler 打包链路（2026-08-25 f36ae0b4e2 首次 Mac 端验证）：node build.mjs + patch.mjs + check-quickjs-compat **PASS** + 三端分发 SHA256 一致（dfe359c7…）
 - ✅ `:shared:iosSimulatorArm64Test` 通过；XCFramework 51MB（ios-arm64 + ios-arm64_x86_64-simulator 双 slice）
 - ✅ Windows `:app:compileDebugKotlin --offline` 通过（8c78bd6e89 时点复验，4s——maxTokens 配置链改动后）
 - ✅ Windows transpiler 打包链路（8c78bd6e89 复验）：build.mjs + patch.mjs + check-quickjs-compat PASS + 三端分发 SHA256 一致（1BEB4F94…）
-- ⬜ 未验证：kernel.sh/kernel.ps1 内核子模块管理命令；真机回归 NO_ADAPTER 修复（清空 deepseek key 后重开旧会话应回落默认 provider 不报错）；真机回归 max-tokens 修复（deepseek-reasoner 问难题应完整出答案不截断）；真机验证 maxTokens 用户配置生效（设置页填 1024 问长答案应截断、填 65536 应完整）
+- ⬜ 未验证：kernel.sh/kernel.ps1 内核子模块管理命令；真机回归 NO_ADAPTER 修复（清空 deepseek key 后重开旧会话应回落默认 provider 不报错）；真机回归 max-tokens 修复（deepseek-reasoner 问难题应完整出答案不截断）；真机验证 maxTokens 用户配置生效（设置页填 1024 问长答案应截断、填 65536 应完整）；**真机回归万字思考（deepseek-reasoner 问难题：思考过程应流畅刷新不卡死、回合结束不崩溃）**；Android/Harmony 端 f36ae0b4e2 编译验证（靠 CI）
 
 ## CI 修复史（8 轮迭代，2026-08-22，Windows 端）
 
@@ -184,3 +190,4 @@ Mac 端后续（2026-08-23）：c5d5d82e71（ConfigService 缓存回写值语义
 - 2026-08-24 Mac 端拉取复验（8c78bd6e89）：pull --rebase 首次遭遇双机记忆文件冲突（双方维护日志并行追加），按协议合并双方条目解决；iOS 侧变更影响评估（harness.js/AppStore/ConfigService/SettingsView 共 4 文件，setConfig 新参带默认值向后兼容，project.yml 未变免 xcodegen）；本地复验 Debug+Release 构建 + XCTest 14/14 全通过，maxTokens 功能在 Mac 本地首次编译验证成功
 - 2026-08-24 Mac 端 Xcode 27 beta 适配（2922a9650a）：清零 IDE 31 issue（编译口径 34 处告警）——四类 Swift 6 并发诊断（noasync 锁 ×23 / @Sendable 捕获 / MainActor 隔离 / unused 结果，见陷阱 15），涉及 LocalEngine/HarnessEngine/HttpBridge/DeviceBridge 共 4 文件 8 处编辑（全部串行，陷阱 13 防护生效）；环境变更：Mac 升级 macOS 27 + Xcode-beta.app 27A5237l 成为唯一 Xcode（xcode-select 指向 CommandLineTools 需 DEVELOPER_DIR）；clean build 0 警告 + XCTest 14/14 复验通过
 - 2026-08-25 Mac 端真机适配（23130e84fa）：清零真机构建 12 处 API 弃用警告（见陷阱 16）——部署目标 16.0→17.0 + onChange/EKEventStore/UIScreen.main 新 API + orientations 补全，涉及 project.yml/Info.plist/ChatView/DeviceBridge 共 4 文件；真机 MyPhone (iPhone 17 Pro/iOS 27 beta) 已连接；真机 clean build（CODE_SIGNING_ALLOWED=NO）0 警告 + XCTest 14/14 通过
+- 2026-08-25 Mac 端双修复（f36ae0b4e2）：①万字思考卡死（内核 emit 阈值 16字/60ms→64字/200ms + iOS 150ms 节流/flushPendingThink 收尾补偿 + 渲染尾部 4000 字封顶 + 日志 240 字截断）；②NSJSONSerialization 顶层 NSNull 崩溃（内核 extractDetails undefined 化剥离 null 字段 + iOS encodeString NSNull 守卫/isValidJSONObject 前置，见陷阱 17/18——try? 接不住 ObjC 异常已实证）。会话中断恢复后按陷阱 13 diff 核对九处编辑全部存活；transpiler 打包 + QuickJS 门禁 PASS + 三端分发 SHA256 一致（dfe359c7）+ 模拟器构建 + XCTest 14/14（**模拟器 runtime 更新 OS 26.5，iPhone 17 Pro 没了改用 iPhone 17e**）；Mac 首次本地验证 transpiler 打包链路
