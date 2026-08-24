@@ -3,7 +3,7 @@
 > 本文件是 TRAE 项目记忆：每次会话自动加载，新会话开工前先读这里，避免重复踩坑。
 > 由 TRAE 生成并按项目进展自动维护：每次会话发生实质变更（新提交/新结论/新陷阱）时由当前会话直接更新。人工修改请同步更新「维护日志」。
 >
-> 最后同步 HEAD: 8c78bd6e89 （2026-08-24，Windows 机；Mac 端同日拉取复验：Debug+Release 构建 + XCTest 14/14 全通过）
+> 最后同步 HEAD: 2922a9650a （2026-08-24，Mac 机：Xcode 27 beta 清零 31 处 Swift 6 并发检查告警 + XCTest 14/14；前一基线 8c78bd6e89 为 Windows 机 maxTokens 配置链）
 
 ## 项目身份
 
@@ -46,6 +46,10 @@ tools/harness-transpiler (TS 转译器，pnpm；含 quickjs-compat 检查，配�
 ### macOS 机（全部跑通过）
 
 ```bash
+# Xcode 27 beta（2026-08-24 起本机唯一 Xcode：/Applications/Xcode-beta.app 27A5237l；
+# xcode-select 仍指向 CommandLineTools，命令行用 xcodebuild 前必须设 DEVELOPER_DIR，免 sudo）
+export DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer
+
 # JDK 17（homebrew openjdk@17）
 export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
 
@@ -111,6 +115,12 @@ Copy-Item tools\harness-transpiler\output\harness.js harmonyApp\entry\src\main\r
 12. **Harmony CI 三坑**（418e7df/19a355b 修复）：Node 20 会挂需 22；`capability-manual.ts` 是 transpiler 构建源必须 git track（.gitignore 误伤过）；hvigor 打包步骤 best-effort（无签名证书，失败不阻塞）
 13. **会话中断丢修改**：TRAE 会话上下文丢失恢复后，先前已"写入文件"的修改可能部分丢失——恢复后必须 `git diff` 与错误清单逐条核对再提交。**变体（2026-08-24 实测）：同一文件的多处编辑禁止并行调用编辑工具——并行写入互相覆盖，仅最后执行的那处存活（三处并行编辑只活了一处）；必须串行逐处编辑并逐处验证落盘**
 14. **max-tokens 截断三症状链**（73efc45 修复）：深度思考计入 DeepSeek `max_tokens` 输出额度，难问题思考中途耗尽 → API `finish_reason:"length"` → 内核 `reason={kind:'max-tokens'}`（**无 error 字段**）→ 三端宿主 describeReason 只查 `reason.error` 落"模型未返回内容"默认文案；同时内核截断时丢 tool-call blocks（UI 显示 0 步）、think 显示 slice(0,8000) 封顶。宿主 buildEngineConfig/refreshProfiles 均**未传 maxTokens**，内核 buildConnection 兜底 8192。修复：内核 chat() 补 max-tokens 文案 + deepseek reasoner 系模型模型级 maxTokens=65536（模型级覆盖 connection 级，链路 `configured?.maxTokens ?? connection.maxTokens`）+ 三端宿主兜底。新增 reason kind 处理时记得它不一定带 error 字段。【修订 2026-08-24，8c78bd6e89】已打通 provider 级 maxTokens 用户配置：三端 provider 编辑页新增「最大输出 Tokens」输入框（留空走默认），api_config.json 持久化 + buildEngineConfig 透传 + 导入导出兼容；用户配置后内核跳过 reasoner 65536 硬编码、统一按用户值生效（决定链：模型级 > provider 级用户配置 > reasoner 硬编码 > 兜底 8192）
+15. **Xcode 27 beta 默认开启 Swift 6 并发诊断**（2922a9650a 修复，2026-08-24 Mac）：Xcode 27 beta5（27A5237l）在 Swift 5 语言模式下也把 Swift 6 并发检查作为默认警告（尾缀 "this is an error in the Swift 6 language mode"），旧代码四类模式集中暴雷（31+ 处）：
+    - async 函数体 / async Task 闭包体内直接调 `NSLock.lock()/unlock()`（noasync）→ 改 `NSLocking.withLock{}`（iOS 16+，闭包体无挂起点时语义完全等价）。**关键事实：`withCheckedThrowingContinuation` 的同步闭包内调锁不告警**（编译器只认 async 函数体/async 闭包体为 asynchronous context），故 HarnessEngine.callAwait 无需改
+    - 非 Sendable 类被 `@Sendable` 闭包捕获（DispatchQueue.global().async / Task）→ 状态确由锁/串行队列保护的类标 `@unchecked Sendable`（HarnessEngine：jsQueue 串行 JSContext + stateLock 保护计数器/continuation）
+    - MainActor 隔离属性（`UIDevice.current` / `UIScreen.main`）在非隔离 async 上下文访问 → 聚合进单个 `MainActor.run` 返回字典，注意接结果要 `var` 才能后续下标赋值
+    - withLock 闭包体若是单表达式且该表达式有返回值（如 `dict.removeValue`），返回值会被推断为闭包返回类型带出外层调用 → unused 告警，显式 `_ =` 丢弃
+    - 修完必须 **clean build** 验证清零：增量构建跳过未改文件的编译，告警不重现会误判已修复
 
 ## 环境事实
 
@@ -165,3 +175,4 @@ Mac 端后续（2026-08-23）：c5d5d82e71（ConfigService 缓存回写值语义
 - 2026-08-24 Windows 端（基线 73efc45193）：修复鸿蒙"0步 8000字思考→模型未返回内容" bug（max-tokens 截断三症状链，见陷阱 14）；CI 三端复绿（iOS 11m16s）；沉淀 transpiler 打包分发命令段；本会话两次踩中陷阱 13（内核 chat 文案、记忆文件 3 处改动均 diff 核对后发现丢失重做）
 - 2026-08-24 Windows 端（8c78bd6e89）：打通 provider 级 maxTokens 用户配置链（内核 buildConnection 用户值跳过 reasoner 硬编码 + 三端 ConfigService 持久化/透传/导入导出 + 三端 provider 编辑页输入框，27 处改动全部串行编辑零丢失——陷阱 13 变体防护生效）；陷阱 14 修订补充决定链；Android 编译 4s 通过、三端分发 SHA256 一致
 - 2026-08-24 Mac 端拉取复验（8c78bd6e89）：pull --rebase 首次遭遇双机记忆文件冲突（双方维护日志并行追加），按协议合并双方条目解决；iOS 侧变更影响评估（harness.js/AppStore/ConfigService/SettingsView 共 4 文件，setConfig 新参带默认值向后兼容，project.yml 未变免 xcodegen）；本地复验 Debug+Release 构建 + XCTest 14/14 全通过，maxTokens 功能在 Mac 本地首次编译验证成功
+- 2026-08-24 Mac 端 Xcode 27 beta 适配（2922a9650a）：清零 IDE 31 issue（编译口径 34 处告警）——四类 Swift 6 并发诊断（noasync 锁 ×23 / @Sendable 捕获 / MainActor 隔离 / unused 结果，见陷阱 15），涉及 LocalEngine/HarnessEngine/HttpBridge/DeviceBridge 共 4 文件 8 处编辑（全部串行，陷阱 13 防护生效）；环境变更：Mac 升级 macOS 27 + Xcode-beta.app 27A5237l 成为唯一 Xcode（xcode-select 指向 CommandLineTools 需 DEVELOPER_DIR）；clean build 0 警告 + XCTest 14/14 复验通过
