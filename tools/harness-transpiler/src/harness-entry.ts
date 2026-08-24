@@ -670,7 +670,7 @@ export class HarnessEngine {
             if (this.thinkAccText.length - this.thinkEmitLen >= 16 || now - this.thinkEmitAt >= 60) {
               this.thinkEmitAt = now
               this.thinkEmitLen = this.thinkAccText.length
-              this.emit('round', { kind: 'thinking', seq: event.seq, text: this.thinkAccText.slice(0, 8000) })
+              this.emit('round', { kind: 'thinking', seq: event.seq, text: this.thinkAccText })
             }
           } else if (chunk && chunk.type === 'text-delta' && typeof chunk.text === 'string' && chunk.text.length > 0) {
             // 答案正文增量：与思考同构的累积 + 逐字级节流下发（16 字 / 60ms）
@@ -692,7 +692,7 @@ export class HarnessEngine {
           const blocks = ((d.message && (d.message as { content?: Array<{ type?: string; text?: string }> }).content) || [])
           const reasoning = blocks.filter((b) => b && b.type === 'reasoning').map((b) => b.text || '').join('')
           if (reasoning.length > 0) {
-            this.emit('round', { kind: 'thinking', seq: event.seq, text: reasoning.slice(0, 8000) })
+            this.emit('round', { kind: 'thinking', seq: event.seq, text: reasoning })
           }
           // 消息落定：flush 节流残留的答案尾部（不足阈值的最末几字）
           const answer = blocks.filter((b) => b && b.type === 'text').map((b) => b.text || '').join('')

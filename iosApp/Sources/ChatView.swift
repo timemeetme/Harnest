@@ -867,8 +867,8 @@ private struct LiveItemRow: View {
                 Text(item.text)
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.textSecondary)
-                    .lineLimit(6)
-                    .truncationMode(.tail)
+                    .lineLimit(nil)
+                    .multilineTextAlignment(.leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(8)

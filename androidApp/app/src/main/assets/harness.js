@@ -31258,14 +31258,13 @@ ${SUMMARY_OPEN_TAG}` },
     }
   }
   __name(assertTextOnly, "assertTextOnly");
-  function serializeAssistant(message, defaults) {
+  function serializeAssistant(message) {
     const text = flattenText(message.content);
     const reasoning = message.content.filter((block) => block.type === "reasoning").map((block) => block.text).join("");
     const toolCalls = message.content.filter((block) => block.type === "tool-call").map((block) => ({
       id: block.id,
       type: "function",
-      function: { name: block.name, arguments: block.arguments },
-      ...defaults.toolCallExtras === "google" && block.thoughtSignature !== void 0 ? { extra_content: { google: { thought_signature: block.thoughtSignature } } } : {}
+      function: { name: block.name, arguments: block.arguments }
     }));
     return {
       role: "assistant",
@@ -31286,7 +31285,7 @@ ${SUMMARY_OPEN_TAG}` },
     };
   }
   __name(serializeAssistant, "serializeAssistant");
-  function serializeMessages(messages, defaults = {}) {
+  function serializeMessages(messages) {
     const wire = [];
     for (const message of messages) {
       assertTextOnly(message.content);
@@ -31295,7 +31294,7 @@ ${SUMMARY_OPEN_TAG}` },
         continue;
       }
       if (message.role === "assistant") {
-        wire.push(serializeAssistant(message, defaults));
+        wire.push(serializeAssistant(message));
         continue;
       }
       const toolResults = message.content.filter((block) => block.type === "tool-result");
@@ -31320,7 +31319,7 @@ ${SUMMARY_OPEN_TAG}` },
     if (options.system !== void 0) {
       messages.push({ role: "system", content: options.system });
     }
-    messages.push(...serializeMessages(options.messages, defaults));
+    messages.push(...serializeMessages(options.messages));
     const tools = options.tools?.map((tool) => ({
       type: "function",
       function: {
@@ -31335,7 +31334,7 @@ ${SUMMARY_OPEN_TAG}` },
       messages,
       stream: true,
       stream_options: { include_usage: true },
-      ...defaults.emitThinking !== false && resolvedThinking.thinking !== void 0 ? { thinking: { type: resolvedThinking.thinking } } : {},
+      ...resolvedThinking.thinking !== void 0 ? { thinking: { type: resolvedThinking.thinking } } : {},
       ...resolvedThinking.reasoningEffort !== void 0 ? { reasoning_effort: resolvedThinking.reasoningEffort } : {},
       ...tools !== void 0 && tools.length > 0 ? { tools } : {},
       ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
@@ -31619,8 +31618,7 @@ ${value}`, dataLines++;
           type: "tool-call",
           id: CallId(block.callId ?? ""),
           name: block.name ?? "",
-          arguments: block.text,
-          ...block.thoughtSignature !== void 0 ? { thoughtSignature: block.thoughtSignature } : {}
+          arguments: block.text
         };
     }
   }
@@ -31683,9 +31681,6 @@ ${value}`, dataLines++;
         }
         for (const call of delta?.tool_calls ?? []) {
           let block = toolBlocks.get(call.index);
-          if (block !== void 0 && call.id !== void 0 && block.callId !== void 0 && call.id !== block.callId) {
-            block = void 0;
-          }
           if (!block) {
             block = open("tool-call");
             toolBlocks.set(call.index, block);
@@ -31693,8 +31688,6 @@ ${value}`, dataLines++;
           }
           if (call.id !== void 0) block.callId = call.id;
           if (call.function?.name !== void 0) block.name = call.function.name;
-          const signature = call.extra_content?.google?.thought_signature;
-          if (signature !== void 0) block.thoughtSignature = signature;
           const fragment = call.function?.arguments ?? "";
           block.text += fragment;
           yield {
@@ -32853,7 +32846,7 @@ ${value}`, dataLines++;
               if (this.thinkAccText.length - this.thinkEmitLen >= 16 || now - this.thinkEmitAt >= 60) {
                 this.thinkEmitAt = now;
                 this.thinkEmitLen = this.thinkAccText.length;
-                this.emit("round", { kind: "thinking", seq: event.seq, text: this.thinkAccText.slice(0, 8e3) });
+                this.emit("round", { kind: "thinking", seq: event.seq, text: this.thinkAccText });
               }
             } else if (chunk && chunk.type === "text-delta" && typeof chunk.text === "string" && chunk.text.length > 0) {
               const key = `${String(d.turn ?? "")}:${String(d.step ?? "")}`;
@@ -32874,7 +32867,7 @@ ${value}`, dataLines++;
             const blocks = d.message && d.message.content || [];
             const reasoning = blocks.filter((b) => b && b.type === "reasoning").map((b) => b.text || "").join("");
             if (reasoning.length > 0) {
-              this.emit("round", { kind: "thinking", seq: event.seq, text: reasoning.slice(0, 8e3) });
+              this.emit("round", { kind: "thinking", seq: event.seq, text: reasoning });
             }
             const answer = blocks.filter((b) => b && b.type === "text").map((b) => b.text || "").join("");
             if (answer.length > 0) {
