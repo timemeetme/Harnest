@@ -407,31 +407,34 @@ final class DeviceBridge {
     }
 
     private func opDeviceInfo() async -> [String: Any] {
-        let device = UIDevice.current
-        device.isBatteryMonitoringEnabled = true
-        let batteryLevel = Int(device.batteryLevel * 100)
-        let batteryState: String
-        switch device.batteryState {
-        case .charging: batteryState = "charging"
-        case .full: batteryState = "full"
-        case .unplugged: batteryState = "unplugged"
-        default: batteryState = "unknown"
+        var deviceInfo = await MainActor.run { () -> [String: Any] in
+            let device = UIDevice.current
+            device.isBatteryMonitoringEnabled = true
+            let batteryLevel = Int(device.batteryLevel * 100)
+            let batteryState: String
+            switch device.batteryState {
+            case .charging: batteryState = "charging"
+            case .full: batteryState = "full"
+            case .unplugged: batteryState = "unplugged"
+            default: batteryState = "unknown"
+            }
+            let screen = UIScreen.main.bounds
+            return [
+                "batteryLevel": batteryLevel,
+                "batteryState": batteryState,
+                "platform": "iOS \(device.systemVersion)",
+                "model": device.model,
+                "name": device.name,
+                "idfv": device.identifierForVendor?.uuidString ?? "",
+                "screen": "\(Int(screen.width))x\(Int(screen.height)) @\(Int(UIScreen.main.scale))x",
+            ]
         }
-        let screen = await MainActor.run { UIScreen.main.bounds }
         let free = ((try? AppPaths.baseDir.resourceValues(forKeys: [.volumeAvailableCapacityKey]))?.volumeAvailableCapacity ?? 0)
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
-        return [
-            "ok": true,
-            "platform": "iOS \(device.systemVersion)",
-            "model": device.model,
-            "name": device.name,
-            "idfv": device.identifierForVendor?.uuidString ?? "",
-            "batteryLevel": batteryLevel,
-            "batteryState": batteryState,
-            "screen": "\(Int(screen.width))x\(Int(screen.height)) @\(Int(UIScreen.main.scale))x",
-            "storageFreeBytes": free,
-            "appVersion": version,
-        ]
+        deviceInfo["ok"] = true
+        deviceInfo["storageFreeBytes"] = free
+        deviceInfo["appVersion"] = version
+        return deviceInfo
     }
 
     private func opVibrate(_ args: [String: Any]) -> [String: Any] {

@@ -54,8 +54,11 @@ enum EngineError: LocalizedError {
  *
  * Engine factory: evaluate harness.js then createEngine() -> instance.
  * callFunc(): __harnessCall(funcName, jsonArgs) -> {sync,resultJson} | callId(async).
+ *
+ * Thread-safety: JSContext access is serialized on jsQueue; counters /
+ * continuations are guarded by stateLock — safe to reference across threads.
  */
-final class HarnessEngine {
+final class HarnessEngine: @unchecked Sendable {
 
     private weak var listener: HostListener?
 

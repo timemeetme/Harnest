@@ -61,21 +61,18 @@ final class LocalEngine {
     func ensureStarted() async throws {
         if isReady() { return }
         while true {
-            lock.lock()
-            if started && (engine?.isReady() ?? false) {
-                lock.unlock()
-                return
-            }
-            if !starting {
+            let claim = lock.withLock { () -> Bool? in
+                if started && (engine?.isReady() ?? false) { return nil }
+                if starting { return false }
                 starting = true
-                lock.unlock()
-                break
+                return true
             }
-            lock.unlock()
+            if claim == nil { return }
+            if claim == true { break }
             try await Task.sleep(nanoseconds: 100_000_000)
         }
         defer {
-            lock.lock(); starting = false; lock.unlock()
+            lock.withLock { starting = false }
         }
 
         do {
@@ -95,19 +92,19 @@ final class LocalEngine {
             })
             let deviceBridge = DeviceBridge(engine: eng)
 
-            lock.lock()
-            engine = eng
-            http = httpBridge
-            device = deviceBridge
-            lock.unlock()
+            lock.withLock {
+                engine = eng
+                http = httpBridge
+                device = deviceBridge
+            }
 
             _ = try await eng.callAwait("init", Self.jsonEncode(engineConfig))
-            lock.lock(); started = true; lock.unlock()
+            lock.withLock { started = true }
             NSLog("local engine started")
         } catch {
-            lock.lock()
-            if engine === nil { http = nil; device = nil }
-            lock.unlock()
+            lock.withLock {
+                if engine === nil { http = nil; device = nil }
+            }
             throw error
         }
     }
@@ -161,14 +158,12 @@ final class LocalEngine {
     func mountSession(_ record: SessionRecord, seedJson: String? = nil) async throws {
         guard isReady(), let eng = engineRef() else { throw EngineError.notStarted }
         setModel(provider: record.provider, model: record.model, effort: record.effort)
-        lock.lock()
-        let mounted = mountedSessionId
-        lock.unlock()
+        let mounted = lock.withLock { mountedSessionId }
         if mounted == record.id { return }
         var args: [String: Any] = ["sessionId": record.id]
         if let seed = seedJson, !seed.isEmpty { args["seedJson"] = seed }
         _ = try await eng.callAwait("createSession", Self.jsonEncode(args))
-        lock.lock(); mountedSessionId = record.id; lock.unlock()
+        lock.withLock { mountedSessionId = record.id }
     }
 
     /// Send a message on the mounted session — returns ChatOutcome dictionary.
@@ -218,7 +213,7 @@ final class LocalEngine {
     /// L2 传输断流 — abortAll() 取消所有在途 URLSession 调用，防止取消后继续重试请求。
     func abortActiveRound() {
         guard isReady() else { return }
-        engineRef()?.callFunc("abortActive", nil)
+        _ = engineRef()?.callFunc("abortActive", nil)
         httpRef()?.abortAll()
     }
 
@@ -254,10 +249,10 @@ final class LocalEngine {
     /// Device self-test (direct): bypass the JS bridge, call DeviceBridge directly.
     func deviceDirectCall(op: String, argsJson: String) async throws -> (Bool, String) {
         guard let dev = deviceRef() else { throw EngineError.notStarted }
-        lock.lock()
-        testSeq += 1
-        let id = testSeq
-        lock.unlock()
+        let id = lock.withLock { () -> Int in
+            testSeq += 1
+            return testSeq
+        }
         let args = (try? JSONSerialization.jsonObject(with: Data(argsJson.utf8))) as? [String: Any] ?? [:]
         let req = Self.jsonEncode(["op": op, "args": args])
         return await withCheckedContinuation { cont in

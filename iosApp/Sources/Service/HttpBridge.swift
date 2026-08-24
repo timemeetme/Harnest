@@ -24,9 +24,7 @@ final class HttpBridge {
         let uuid = UUID()
         let task = Task { [weak self] in
             await self?.run(uuid: uuid, fetchId: fetchId, requestJson: requestJson)
-            self?.lock.lock()
-            self?.active.removeValue(forKey: uuid)
-            self?.lock.unlock()
+            _ = self?.lock.withLock { self?.active.removeValue(forKey: uuid) }
         }
         lock.lock()
         active[uuid] = task
