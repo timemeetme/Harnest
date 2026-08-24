@@ -1131,20 +1131,28 @@ export struct ChatView {
       })
 
       if (this.isLiveOpen(panelKey + '_panel', isSending)) {
-        ForEach(this.groupLiveItems(items), (group: LiveItem[], idx: number) => {
-          Column() {
-            if (group[0].kind === 'think') {
-              this.thinkGroup(group, isSending && idx === this.groupLiveItems(items).length - 1,
-                panelKey + '_tg' + idx)
-            } else if (group[0].kind === 'tool') {
-              this.toolLiveRow(group[0], panelKey + '_tl' + idx)
-            } else if (group[0].kind === 'answer') {
-              this.answerLiveBlock(group[0], isSending)
-            } else {
-              this.todosLiveBlock(group[0], panelKey + '_td' + idx)
-            }
+        Scroll() {
+          Column({ space: 2 }) {
+            ForEach(this.groupLiveItems(items), (group: LiveItem[], idx: number) => {
+              Column() {
+                if (group[0].kind === 'think') {
+                  this.thinkGroup(group, isSending && idx === this.groupLiveItems(items).length - 1,
+                    panelKey + '_tg' + idx)
+                } else if (group[0].kind === 'tool') {
+                  this.toolLiveRow(group[0], panelKey + '_tl' + idx)
+                } else if (group[0].kind === 'answer') {
+                  this.answerLiveBlock(group[0], isSending)
+                } else {
+                  this.todosLiveBlock(group[0], panelKey + '_td' + idx)
+                }
+              }
+            }, (group: LiveItem[], idx: number) => panelKey + '_g' + idx + '_' + this.liveGroupSig(group))
           }
-        }, (group: LiveItem[], idx: number) => panelKey + '_g' + idx + '_' + this.liveGroupSig(group))
+          .width('100%')
+        }
+        .scrollBar(BarState.Off)
+        .width('100%')
+        .constraintSize({ maxHeight: 280 })
       }
     }
     .width('100%')
@@ -1199,20 +1207,15 @@ export struct ChatView {
     .alignItems(HorizontalAlign.Start)
   }
 
-  /** 单段思考（二级折叠）：默认 3 行截断，点击切换全文。 */
+  /** 单段思考：完整展示不截断。 */
   @Builder
   thinkSegment(seg: LiveItem, key: string) {
     Text(seg.text)
       .fontSize('12fp')
       .fontColor(this.theme.textHint)
       .lineHeight(17)
-      .maxLines(this.isLiveOpen(key + '_full', false) ? 999 : 3)
-      .textOverflow({ overflow: TextOverflow.Ellipsis })
       .width('100%')
       .padding({ top: 4, bottom: 4 })
-      .onClick(() => {
-        this.toggleLive(key + '_full', false);
-      })
   }
 
   /** 流式答案块：逐字到达的答案正文 + 光标；round 结束后由正式消息气泡接管。 */

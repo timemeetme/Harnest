@@ -1154,7 +1154,12 @@ fun LiveActivityPanel(items: List<LiveItem>, isSending: Boolean) {
             )
         }
         AnimatedVisibility(visible = panelExpanded) {
-            Column {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 280.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
                 Spacer(Modifier.height(6.dp))
                 groups.forEachIndexed { idx, group ->
                     if (idx > 0) Spacer(Modifier.height(2.dp))
@@ -1354,17 +1359,13 @@ private fun AnswerGroup(segments: List<LiveItem.Answer>, autoExpand: Boolean) {
 @Composable
 private fun ThinkSegment(seg: LiveItem.Think) {
     val c = harnessColors()
-    var full by remember(seg.seq) { mutableStateOf(false) }
     Text(
         seg.text,
         color = c.textHint,
         fontSize = 12.sp,
         lineHeight = 17.sp,
-        maxLines = if (full) Int.MAX_VALUE else 3,
-        overflow = TextOverflow.Ellipsis,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { full = !full }
             .padding(vertical = 4.dp),
     )
 }
