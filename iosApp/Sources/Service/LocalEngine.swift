@@ -152,6 +152,22 @@ final class LocalEngine {
         return arr
     }
 
+    /// Tier B：token 用量快照（内核 getUsageStats — TokenMeter 即时计量）。
+    /// 返回 {ok, sessionId, totalTokens, surfaceTokens, surfaceDeltaTokens,
+    ///       baseline("none"/"estimated"/"usage"), contextWindow, usageRatio}；
+    /// 冷启动 baseline = "none"；未就绪/解析失败返回 nil。
+    func usageStats() -> [String: Any]? {
+        guard let eng = engineRef() else { return nil }
+        let envelope = eng.callFunc("getUsageStats", nil)
+        guard let r = envelope.resultJson,
+              let data = r.data(using: .utf8),
+              let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            NSLog("usageStats parse failed: \(envelope.error ?? "?")")
+            return nil
+        }
+        return obj
+    }
+
     /// Mount a session into the kernel: applies the session's model selection first.
     /// seedJson：会话 .jsonl 事件日志（k3b 会话内记忆）— 内核解析为平衡前缀 seed 后
     /// replay 重建上下文；nil = 全新会话。已挂载同一会话时跳过（内核态即完整真相）。

@@ -102,6 +102,11 @@ final class AppStore: ObservableObject {
     private var answerPendingTurn = 0
     private var answerPendingStep = 0
 
+    /// Tier B：token 水位条（内核 getUsageStats — TokenMeter 即时计量快照驱动）
+    @Published var usageRatio: Double = 0
+    @Published var usageText: String = ""
+    @Published var usageCold: Bool = true
+
     /// k6 停止标志（doSend 收尾时检查 — 清空队列 vs 续发）
     private var stopped = false
 
@@ -298,6 +303,26 @@ final class AppStore: ObservableObject {
         config.setLastSelection(provider: provider, model: model, effort: clean)
         engine.setModel(provider: provider, model: model, effort: clean)
         modelRev += 1
+        Task { await refreshUsageStats() }
+    }
+
+    /// Tier B：拉取 token 用量快照驱动水位条（回合结束 / 会话挂载 / 换模型时调用）。
+    /// 内核返回 {ok, totalTokens, baseline("none"/"estimated"/"usage"), contextWindow, ...}；
+    /// baseline == "none" 为冷启动（无计量数据），水位条半透明提示。
+    func refreshUsageStats() async {
+        guard let stats = engine.usageStats(), stats["ok"] as? Bool == true else { return }
+        let total = (stats["totalTokens"] as? NSNumber)?.doubleValue ?? 0
+        let window = (stats["contextWindow"] as? NSNumber)?.doubleValue ?? 0
+        usageCold = (stats["baseline"] as? String ?? "none") == "none"
+        usageRatio = window > 0 ? total / window : 0
+        usageText = "\(fmtTok(total))/\(fmtTok(window))"
+    }
+
+    /// 1234567 → "1.2m"；12345 → "12.3k"；小于 1000 → 整数。
+    private func fmtTok(_ v: Double) -> String {
+        if v >= 1_000_000 { return String(format: "%.1fm", v / 1_000_000) }
+        if v >= 1_000 { return String(format: "%.1fk", v / 1_000) }
+        return String(format: "%.0f", v)
     }
 
     /// Provider catalog for the model picker — kernel list, fallback to local config.
@@ -375,6 +400,7 @@ final class AppStore: ObservableObject {
 
         // k3b：带事件日志种子挂载（内核 replay 重建上下文）
         try? await engine.mountSession(session, seedJson: store.readSeedJson(sessionId: session.id))
+        await refreshUsageStats()
         busyHint = ""
 
         session.messages.append(StoredMessage(
@@ -414,6 +440,7 @@ final class AppStore: ObservableObject {
         flushPendingThink()
         busy = false
         busyHint = ""
+        Task { await refreshUsageStats() }
         if stopped {
             let n = queuedMessages.count
             queuedMessages = []
@@ -655,6 +682,25 @@ final class AppStore: ObservableObject {
             let res = try await engine.setPlanMode(active: next)
             if res["ok"] as? Bool != false {
                 planActive = (res["active"] as? Bool) ?? next
+                toast(planActive ? "🧭 计划模式已开启" : "🧭 计划模式已关闭")
+            } else {
+                toast("计划模式切换失败")
+            }
+        } catch {
+            toast("计划模式切换失败")
+        }
+    }
+
+    /// Tier B：/plan on|off 定向开关（无参 /plan 切换走 togglePlan）。
+    func applyPlan(active: Bool) async {
+        guard engine.isReady() else {
+            toast("内核未启动 — 发送一条消息后再切换")
+            return
+        }
+        do {
+            let res = try await engine.setPlanMode(active: active)
+            if res["ok"] as? Bool != false {
+                planActive = (res["active"] as? Bool) ?? active
                 toast(planActive ? "🧭 计划模式已开启" : "🧭 计划模式已关闭")
             } else {
                 toast("计划模式切换失败")

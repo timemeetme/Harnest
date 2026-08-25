@@ -312,6 +312,24 @@ struct ChatView: View {
         VStack(spacing: 6) {
             if app.busy && !app.busyHint.isEmpty { busyBar }
             if !app.queuedMessages.isEmpty { queuedChips }
+            if app.usageRatio > 0 {
+                HStack(spacing: 6) {
+                    ProgressView(value: min(app.usageRatio, 1))
+                        .progressViewStyle(.linear)
+                        .frame(height: 3)
+                        .tint(app.usageRatio < 0.5 ? Theme.accent.opacity(0.6) : (app.usageRatio < 0.8 ? .orange : .red))
+                    Text(app.usageText)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Theme.textSecondary)
+                }
+                .opacity(app.usageCold ? 0.5 : 1)
+            }
+            if draft.hasPrefix("/") {
+                Text("⌘ /plan — 切换规划模式（on / off）")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             HStack(spacing: 10) {
                 TextField(
                     app.busy ? "追加指令：⚡转向 或 ⏳排队…" : "发送消息…",
@@ -445,6 +463,20 @@ struct ChatView: View {
         guard hasDraft else { return }
         let text = draft
         draft = ""
+        // Tier B：斜杠命令拦截（/plan、/plan on、/plan off → 切换规划模式，不进对话链路）
+        if mode == .send {
+            let cmd = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if cmd == "/plan" || cmd == "/plan on" || cmd == "/plan off" {
+                Task {
+                    if cmd == "/plan" {
+                        await app.togglePlan()
+                    } else {
+                        await app.applyPlan(active: cmd == "/plan on")
+                    }
+                }
+                return
+            }
+        }
         switch mode {
         case .send:
             Task { await app.send(text) }
@@ -1532,6 +1564,16 @@ private struct PendingQuestionCard: View {
 
     /// 题目下标 → 选择（选项 label 列表 + 可选自定义文本）
     @State private var picks: [Int: QuestionPick] = [:]
+    /// Tier B：3 题/页分页（末页才提交；allAnswered 仍对全集计算）
+    @State private var page = 0
+
+    private var totalPages: Int { max((question.questions.count + 2) / 3, 1) }
+
+    private var pageIndices: Range<Int> {
+        let start = page * 3
+        let end = min(start + 3, question.questions.count)
+        return start..<max(start, end)
+    }
 
     private var question: PendingQuestion {
         app.pendingQuestion ?? PendingQuestion(qid: 0, questions: [])
@@ -1557,8 +1599,8 @@ private struct PendingQuestionCard: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    ForEach(Array(question.questions.enumerated()), id: \.element.id) { idx, q in
-                        questionBlock(idx, q)
+                    ForEach(Array(pageIndices), id: \.self) { idx in
+                        questionBlock(idx, question.questions[idx])
                     }
                 }
                 .padding(.vertical, 2)
@@ -1569,6 +1611,7 @@ private struct PendingQuestionCard: View {
                 Button {
                     Task { await app.skipPendingQuestion() }
                     picks = [:]
+                    page = 0
                 } label: {
                     Text("跳过")
                         .font(.system(size: 13, weight: .medium))
@@ -1579,19 +1622,63 @@ private struct PendingQuestionCard: View {
                         .clipShape(RoundedRectangle(cornerRadius: 10))
                 }
                 .accessibilityLabel("跳过提问")
-                Button {
-                    Task { await app.answerPendingQuestion(picks) }
-                    picks = [:]
-                } label: {
-                    Text("提交回答")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(Theme.onPrimary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 9)
-                        .background(allAnswered ? Theme.primary : Theme.surfaceElevated)
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                if totalPages > 1 && page < totalPages - 1 {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.15)) { page += 1 }
+                    } label: {
+                        Text("下一页 ›")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.onPrimary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(Theme.primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    .accessibilityLabel("下一页")
+                } else {
+                    Button {
+                        Task { await app.answerPendingQuestion(picks) }
+                        picks = [:]
+                        page = 0
+                    } label: {
+                        Text("提交回答")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Theme.onPrimary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 9)
+                            .background(allAnswered ? Theme.primary : Theme.surfaceElevated)
+                            .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    .disabled(!allAnswered)
                 }
-                .disabled(!allAnswered)
+            }
+            if totalPages > 1 {
+                HStack(spacing: 14) {
+                    Button {
+                        if page > 0 { withAnimation(.easeOut(duration: 0.15)) { page -= 1 } }
+                    } label: {
+                        Text("‹")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(page > 0 ? Theme.textSecondary : Theme.textHint)
+                            .frame(width: 26, height: 22)
+                    }
+                    .disabled(page == 0)
+                    .accessibilityLabel("上一页")
+                    Text("\(page + 1)/\(totalPages)")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(Theme.textSecondary)
+                    Button {
+                        if page < totalPages - 1 { withAnimation(.easeOut(duration: 0.15)) { page += 1 } }
+                    } label: {
+                        Text("›")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(page < totalPages - 1 ? Theme.textSecondary : Theme.textHint)
+                            .frame(width: 26, height: 22)
+                    }
+                    .disabled(page >= totalPages - 1)
+                    .accessibilityLabel("下一页")
+                }
+                .frame(maxWidth: .infinity)
             }
         }
         .padding(12)

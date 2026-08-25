@@ -192,6 +192,10 @@ final class DeviceBridge {
         case "deviceinfo": return await opDeviceInfo()
         case "vibrate": return opVibrate(args)
         case "share": return await opShare(args)
+        case "runScript":
+            let code = args["code"] as? String ?? ""
+            let timeoutMs = args["timeoutMs"] as? Int ?? 60_000
+            return ScriptSandbox.shared.runSync(code: code, timeoutMs: timeoutMs)
         case "contacts", "calendar", "mail", "call", "sms", "recorder",
              "app", "location", "settings", "reminder", "gui", "scheduler":
             return ["ok": false, "error": "iOS 端暂未接入: \(tool)"]
