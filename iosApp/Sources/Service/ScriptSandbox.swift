@@ -225,7 +225,8 @@ final class ScriptSandbox: @unchecked Sendable {
     // MARK: - 文件桥（沙箱根内读写）
 
     private static func resolvePath(root: URL, path: String) -> URL? {
-        let url = URL(fileURLWithPath: path, relativeTo: root).standardizedFileURL
+        let cleanPath = path.hasPrefix("/") ? String(path.dropFirst()) : path
+        let url = URL(fileURLWithPath: cleanPath, relativeTo: root).standardizedFileURL
         let rootPath = root.standardizedFileURL.path
         guard url.path == rootPath || url.path.hasPrefix(rootPath + "/") else { return nil }
         return url
