@@ -230,6 +230,29 @@ class LocalEngine private constructor() {
         return JSONArray()
     }
 
+    /** Tier B：当前会话 token 用量（输入框上方水位条）。同步 callFunc，非阻塞内核读取；
+     *  内核未就绪 / entry 未暴露该接口 / 解析失败一律返回 null（UI 隐藏水位条）。 */
+    fun usageStats(): Map<String, Any?>? {
+        if (!isReady()) return null
+        return try {
+            val envelope = engine?.callFunc("getUsageStats", "{}") ?: return null
+            val json = envelope.resultJson ?: return null
+            val o = JSONObject(json)
+            if (!o.optBoolean("ok", false)) null else buildMap {
+                put("sessionId", o.optString("sessionId", ""))
+                put("totalTokens", o.optLong("totalTokens", 0L))
+                put("surfaceTokens", o.optLong("surfaceTokens", 0L))
+                put("surfaceDeltaTokens", o.optLong("surfaceDeltaTokens", 0L))
+                put("baseline", o.optString("baseline", "none"))
+                put("contextWindow", o.optLong("contextWindow", 0L))
+                put("usageRatio", o.optDouble("usageRatio", 0.0).toFloat())
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "usageStats failed: ${e.message}")
+            null
+        }
+    }
+
     /** Mount a session into the kernel: applies the session's model selection first.
      *  seedJson：会话 .jsonl 事件日志（k3b 会话内记忆）— 内核解析为平衡前缀 seed 后
      *  replay 重建上下文；null = 全新会话。已挂载同一会话时跳过（内核态即完整真相）。 */

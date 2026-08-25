@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -37,6 +38,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.window.Dialog
 import androidx.compose.foundation.text.BasicTextField
@@ -62,7 +64,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import com.harnest.app.common.ReasoningEfforts
 import com.harnest.app.service.SessionRecord
 import com.harnest.app.service.StoredMessage
@@ -139,6 +143,9 @@ fun ChatView(
     onSubmitAnswers: (List<PendingAnswer>) -> Unit,
     planActive: Boolean,
     onTogglePlan: () -> Unit,
+    usageRatio: Float,
+    usageText: String,
+    usageBaseline: String,
     onSelectModel: (String, String, String?) -> Unit,
     onGoSettings: () -> Unit,
     onOpenAccessibility: () -> Unit,
@@ -228,6 +235,9 @@ fun ChatView(
                 isSending = isSending,
                 busyHint = busyHint,
                 queuedMessages = queuedMessages,
+                usageRatio = usageRatio,
+                usageText = usageText,
+                usageBaseline = usageBaseline,
                 onSend = onSend,
                 onStop = onStop,
                 onQueue = onQueue,
@@ -1013,6 +1023,9 @@ private fun InputArea(
     isSending: Boolean,
     busyHint: String,
     queuedMessages: List<String>,
+    usageRatio: Float,
+    usageText: String,
+    usageBaseline: String,
     onSend: (String) -> Unit,
     onStop: () -> Unit,
     onQueue: (String) -> Unit,
@@ -1028,6 +1041,49 @@ private fun InputArea(
             .background(c.surface)
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
+        // Tier B token 水位条：当前会话上下文占用（surfaceTokens/contextWindow）。
+        // 分档变色 <50% 灰绿 / <80% 黄 / ≥80% 红；ratio==0 或无 caption（内核未支持）整条隐藏；
+        // baseline=="none"（无估算基准）半透明提示精度低
+        if (usageRatio > 0f && usageText.isNotEmpty()) {
+            val barColor = when {
+                usageRatio >= 0.8f -> c.error
+                usageRatio >= 0.5f -> Color(0xFFFFA000)
+                else -> Color(0xFF6BBF8A)
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 6.dp)
+                    .alpha(if (usageBaseline == "none") 0.5f else 1f),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LinearProgressIndicator(
+                    progress = { usageRatio.coerceIn(0f, 1f) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(3.dp),
+                    color = barColor,
+                    trackColor = c.divider,
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    usageText,
+                    color = c.textHint,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
+        // /plan 斜杠命令提示：输入以 / 开头时提示（"/plan" / "/plan on" / "/plan off" 本地拦截）
+        if (text.startsWith("/")) {
+            Text(
+                "⌘ /plan — 切换规划模式（on / off）",
+                color = c.textHint,
+                fontSize = 10.sp,
+                maxLines = 1,
+                modifier = Modifier.padding(bottom = 6.dp),
+            )
+        }
         if (isSending) {
             Text(
                 busyHint.ifEmpty { "回复中…" },
@@ -1998,6 +2054,11 @@ private fun QuestionCard(
     val customs = remember(questions) {
         questions.associate { q -> q.id to mutableStateOf("") }
     }
+    // 分页：每 3 题一页 — 多题卡片不再把提交键挤出可视区；qid 变化时页码重置回第一页
+    val pageSize = 3
+    val pageCount = (questions.size + pageSize - 1) / pageSize
+    var page by remember(questions) { mutableStateOf(0) }
+    val pageQuestions = questions.drop(page * pageSize).take(pageSize)
     Column(
         Modifier
             .fillMaxWidth()
@@ -2015,17 +2076,55 @@ private fun QuestionCard(
             fontWeight = FontWeight.SemiBold,
         )
         Spacer(Modifier.height(8.dp))
-        questions.forEachIndexed { idx, q ->
+        pageQuestions.forEachIndexed { idx, q ->
             if (idx > 0) Spacer(Modifier.height(10.dp))
             QuestionBlock(q, selections.getValue(q.id), customs.getValue(q.id))
         }
         Spacer(Modifier.height(10.dp))
+        // 多页页脚：‹ / n/total / ›（≤3 题单页不显示）
+        if (pageCount > 1) {
+            Row(
+                Modifier.align(Alignment.End),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick = { if (page > 0) page-- },
+                    enabled = page > 0,
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                ) {
+                    Text(
+                        "‹",
+                        color = if (page > 0) c.textHint else c.divider,
+                        fontSize = 16.sp,
+                    )
+                }
+                Text(
+                    "${page + 1}/$pageCount",
+                    color = c.textHint,
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+                TextButton(
+                    onClick = { if (page < pageCount - 1) page++ },
+                    enabled = page < pageCount - 1,
+                    contentPadding = PaddingValues(horizontal = 10.dp),
+                ) {
+                    Text(
+                        "›",
+                        color = if (page < pageCount - 1) c.textHint else c.divider,
+                        fontSize = 16.sp,
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        // 提交/跳过仅末页显示；allAnswered 门禁仍对全集计算（跨页答案都计入）
         val allAnswered = questions.all { q ->
             selections.getValue(q.id).value.isNotEmpty()
                 || customs.getValue(q.id).value.isNotBlank()
                 || q.options.isEmpty()
         }
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        if (page >= pageCount - 1) Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier
                     .weight(1f)

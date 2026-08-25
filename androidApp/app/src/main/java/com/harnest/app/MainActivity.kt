@@ -127,6 +127,9 @@ class MainActivity : ComponentActivity() {
     private val pendingQuestions = mutableStateOf<List<PendingQuestion>>(emptyList()) // k5：提问卡数据（含 plan-review 审批）
     private val planModeActive = mutableStateOf(false) // k5：Plan 模式开关（每回合 details.planActive 同步）
     private val bgJobs = mutableStateOf<List<BgJobView>>(emptyList()) // k7e：后台任务可见集（jobs 事件覆盖式镜像）
+    private val usageRatio = mutableStateOf(0f) // Tier B：上下文水位 0..1（surfaceTokens/contextWindow）
+    private val usageText = mutableStateOf("") // 水位条 caption（"12.3k/64k"）；空 = 隐藏整条
+    private val usageBaseline = mutableStateOf("none") // none/estimated/usage — none=无估算基准，条半透明
     private var roundThinkChars = 0
     private var roundAnswerChars = 0
     // 思考/回复节流（150ms，窗口须严格小于内核 200ms 心跳防相位锁死）：万字累积全量高频
@@ -424,10 +427,39 @@ class MainActivity : ComponentActivity() {
         toast("${Providers.metaOf(provider)?.label ?: provider} · $model$effortTag")
     }
 
-    /** 发送入口（k4）：回合运行中 → 排队（本轮结束自动续发）；空闲 → 立即开新回合。 */
+    /** Tier B：刷新 token 水位（会话挂载成功 + 每回合收尾各一次）。内核不支持/未就绪
+     *  （callFunc 失败、entry 未暴露 getUsageStats）→ 清零隐藏，不报错不打扰主流程。 */
+    private fun refreshUsageStats() {
+        val s = LocalEngine.get().usageStats()
+        if (s == null) {
+            usageRatio.value = 0f
+            usageText.value = ""
+            usageBaseline.value = "none"
+            return
+        }
+        val surface = (s["surfaceTokens"] as? Long) ?: 0L
+        val window = (s["contextWindow"] as? Long) ?: 0L
+        usageRatio.value = (s["usageRatio"] as? Float) ?: 0f
+        usageBaseline.value = (s["baseline"] as? String) ?: "none"
+        usageText.value = if (window > 0) "${fmtTokK(surface)}/${fmtTokK(window)}" else fmtTokK(surface)
+    }
+
+    /** token 数 k/m 缩写（1234 → "1.2k"，1500000 → "1.5m"；与 ChatView.fmtTok 同规格）。 */
+    private fun fmtTokK(n: Long): String = when {
+        n >= 1_000_000L -> String.format(java.util.Locale.US, "%.1fm", n / 1_000_000.0)
+        n >= 1_000L -> String.format(java.util.Locale.US, "%.1fk", n / 1_000.0)
+        else -> n.toString()
+    }
+
+    /** 发送入口（k4）：回合运行中 → 排队（本轮结束自动续发）；空闲 → 立即开新回合。
+     *  /plan 斜杠命令本地拦截，不进 chat 管道（输入框清空由 UI 侧 onSend 统一处理）。 */
     private fun send(text: String) {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return
+        if (trimmed == "/plan" || trimmed == "/plan on" || trimmed == "/plan off") {
+            planSlashCommand(trimmed != "/plan off")
+            return
+        }
         if (busy.value) {
             queueMessage(trimmed)
             return
@@ -525,6 +557,7 @@ class MainActivity : ComponentActivity() {
                     SessionStore.get(this@MainActivity).readSeedJson(session.id)
                 }
                 LocalEngine.get().mountSession(session, seedJson)
+                refreshUsageStats() // Tier B：seed replay 后的初始水位（旧会话重开即见存量占用）
                 // 记录「最后一次对话所用的模型」：新会话默认值以此为准（选择器临时切换不影响）
                 ConfigService.get(this@MainActivity).setLastSelection(session.provider, session.model, session.effort)
                 if (session.messages.isEmpty()) session.title = SessionStore.titleFrom(trimmed)
@@ -626,15 +659,17 @@ class MainActivity : ComponentActivity() {
                 refreshSessions()
             } finally {
                 flushPendingLive()
+                refreshUsageStats() // Tier B：回合收尾刷新水位（本轮新增上下文立刻反映到输入框上方）
                 sendJob = null
                 busy.value = false
                 busyHint.value = ""
                 messagesRev.value++
             }
-            // k4 排队续发：回合自然结束（非停止）且队列非空 → 弹出队首自动开下一回合
+            // k4 排队续发：回合自然结束（非停止）且队列非空 → 弹出队首自动开下一回合。
+            // 走 send() 而非 sendNow()：busy 期间排队的 /plan 斜杠命令在续发时同样被拦截
             if (!stopped && pendingQueue.isNotEmpty() && currentSession.value != null) {
                 val next = pendingQueue.removeAt(0)
-                sendNow(next)
+                send(next)
             }
         }
     }
@@ -999,7 +1034,10 @@ class MainActivity : ComponentActivity() {
 
     /** k5 开关 Plan 模式：回合外 committed 立即生效，回合内 queued 挂起到下一
      *  pre-step；开启后 agent 先产出计划（exit_plan_mode）经提问卡审批，批准才继续执行。 */
-    private fun togglePlanMode() {
+    private fun togglePlanMode() = planSlashCommand(!planModeActive.value)
+
+    /** k5 Plan 模式切换统一入口：🧭 按钮取反 + /plan 斜杠命令指定目标态共用。 */
+    private fun planSlashCommand(active: Boolean) {
         val session = currentSession.value
         if (session == null) {
             toast("先发送一条消息建立会话")
@@ -1016,7 +1054,7 @@ class MainActivity : ComponentActivity() {
                     SessionStore.get(this@MainActivity).readSeedJson(session.id)
                 }
                 LocalEngine.get().mountSession(session, seedJson)
-                val r = LocalEngine.get().setPlanMode(!planModeActive.value)
+                val r = LocalEngine.get().setPlanMode(active)
                 planModeActive.value = r.optBoolean("active", false)
                 toast(
                     when (r.optString("result")) {
@@ -1371,6 +1409,9 @@ class MainActivity : ComponentActivity() {
             onSkipQuestions = { skipPendingQuestion() },
             planActive = planModeActive.value,
             onTogglePlan = { togglePlanMode() },
+            usageRatio = usageRatio.value,
+            usageText = usageText.value,
+            usageBaseline = usageBaseline.value,
             onSelectModel = { p, m, e -> applyModel(p, m, e) },
             onGoSettings = { onTab(TAB_SETTINGS) },
             onOpenAccessibility = {

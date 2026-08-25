@@ -17,6 +17,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.harnest.app.engine.FsBridge
 import com.harnest.app.engine.HarnessEngine
+import com.harnest.app.engine.ScriptSandbox
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -138,6 +139,7 @@ class DeviceBridge(
             "gui" -> GuiBridge.execute(context, args)
             "scheduler" -> DeviceScheduler.op(context, args)
             "share" -> opShare(args)
+            "runScript" -> opRunScript(args)
             else -> JSONObject().put("ok", false).put("error", "unknown tool: $tool")
         }
     }
@@ -153,6 +155,25 @@ class DeviceBridge(
             .put("app", context.packageName)
             .put("capabilities", JSONArray(CAPABILITIES))
             .put("note", "Android port of the Harness device bridge — same tool contract as the HarmonyOS version; gui requires the accessibility service to be enabled in system settings")
+    }
+
+    /** run_script：JS 沙箱执行（ScriptSandbox 专用 QuickJS，文件锁 filesDir/scripts 内）。
+     *  阻塞至脚本 settle 或超时（上限 120s），结果 {ok,result,stdout,stdoutTruncated,timedOut,durationMs,error?}。 */
+    private fun opRunScript(args: JSONObject): JSONObject {
+        val code = args.optString("code", "")
+        if (code.isEmpty()) return JSONObject().put("ok", false).put("error", "code is required")
+        val timeoutMs = args.optLong("timeoutMs", 60_000L).coerceIn(1_000L, 120_000L)
+        val res = ScriptSandbox.get(context).runSync(code, timeoutMs)
+        val out = JSONObject()
+            .put("ok", res["ok"] == true)
+            .put("result", res["result"] as? String ?: "")
+            .put("stdout", res["stdout"] as? String ?: "")
+            .put("stdoutTruncated", res["stdoutTruncated"] == true)
+            .put("timedOut", res["timedOut"] == true)
+            .put("durationMs", res["durationMs"] as? Long ?: 0L)
+        val err = res["error"] as? String
+        if (!err.isNullOrEmpty()) out.put("error", err)
+        return out
     }
 
     private suspend fun opPermissions(args: JSONObject): JSONObject {
