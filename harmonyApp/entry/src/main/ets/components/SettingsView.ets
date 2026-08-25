@@ -13,6 +13,7 @@ import {
   appearanceLabel
 } from '../service/AppearanceService';
 import { AppViewModel } from '../viewmodel/AppViewModel';
+import { UiState, LogLineUi } from '../model/UiModels';
 import { ConfigService, ProviderConfig, ImportOutcome } from '../service/ConfigService';
 import { ALL_PROVIDERS, PROVIDER_META } from '../common/Constants';
 
@@ -23,6 +24,8 @@ import { ALL_PROVIDERS, PROVIDER_META } from '../common/Constants';
 export struct SettingsView {
   viewModel: AppViewModel = new AppViewModel();
   onConfigSaved: () => void = () => {};
+  /** A4 打开运行日志查看器（由 Index 宿主承载全屏覆盖层） */
+  onOpenLogs: () => void = () => {};
   @StorageProp(KEY_THEME) theme: ThemeColors = darkTheme;
   @StorageProp(KEY_APPEARANCE) appearanceMode: string = 'system';
   /** 正在编辑的 provider（null = 列表页） */
@@ -167,6 +170,23 @@ export struct SettingsView {
         .margin({ left: 16, right: 16 })
         .onClick(() => {
           router.pushUrl({ url: 'pages/DeviceTest' });
+        })
+
+        Row() {
+          Column({ space: 2 }) {
+            Text('运行日志').fontSize('14fp').fontColor(this.theme.textPrimary)
+            Text('内核与桥接日志（最近 300 行）').fontSize('11fp').fontColor(this.theme.textHint)
+          }
+          .alignItems(HorizontalAlign.Start).layoutWeight(1)
+          Text('›').fontSize('16fp').fontColor(this.theme.textHint).margin({ left: 8 })
+        }
+        .width('100%')
+        .padding(14)
+        .borderRadius(10)
+        .backgroundColor(this.theme.surface)
+        .margin({ left: 16, right: 16 })
+        .onClick(() => {
+          this.onOpenLogs();
         })
 
         this.sectionHeader('关于', '')
@@ -523,5 +543,69 @@ export struct SettingsView {
     this.onConfigSaved();
     this.importText = '';
     return true;
+  }
+}
+
+/**
+ * A4 运行日志查看器：全屏覆盖层（Android LogsOverlay 同构）。
+ * 标题 + 行数 + 清空/关闭；等宽字体滚动列表，LogLineUi.seq 稳定键防环形截断全列表重渲染。
+ */
+@Component
+export struct LogsOverlay {
+  viewModel: AppViewModel = new AppViewModel();
+  @ObjectLink state: UiState;
+  @StorageProp(KEY_THEME) theme: ThemeColors = darkTheme;
+  onClose: () => void = () => {};
+
+  build() {
+    Column() {
+      Row({ space: 8 }) {
+        Column({ space: 2 }) {
+          Text('运行日志').fontSize('16fp').fontColor(this.theme.textPrimary)
+          Text(this.state.logLines.length + ' 行').fontSize('10fp').fontColor(this.theme.textHint)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .layoutWeight(1)
+
+        Text('清空')
+          .fontSize('13fp')
+          .fontColor(this.theme.textSecondary)
+          .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+          .onClick(() => {
+            this.viewModel.clearLogs();
+          })
+        Text('关闭')
+          .fontSize('13fp')
+          .fontColor(this.theme.primary)
+          .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+          .onClick(() => {
+            this.onClose();
+          })
+      }
+      .width('100%')
+      .height(52)
+      .padding({ left: 16, right: 16 })
+      .backgroundColor(this.theme.surface)
+      .alignItems(VerticalAlign.Center)
+
+      List({ space: 2 }) {
+        ForEach(this.state.logLines, (line: LogLineUi) => {
+          ListItem() {
+            Text(line.text)
+              .fontSize('10fp')
+              .fontFamily('monospace')
+              .fontColor(this.theme.textSecondary)
+              .width('100%')
+          }
+        }, (line: LogLineUi) => 'log_' + line.seq)
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .padding({ left: 12, right: 12, top: 8, bottom: 8 })
+      .scrollBar(BarState.Auto)
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor(this.theme.background)
   }
 }

@@ -1,4 +1,4 @@
-﻿import { common } from '@kit.AbilityKit';
+import { common } from '@kit.AbilityKit';
 import { mediaquery } from '@kit.ArkUI';
 import { ThemeColors, darkTheme } from '../theme/Theme';
 import { KEY_THEME } from '../service/AppearanceService';
@@ -7,7 +7,7 @@ import { ConfigService } from '../service/ConfigService';
 import { AppViewModel } from '../viewmodel/AppViewModel';
 import { ChatView } from '../components/ChatView';
 import { DetailsView } from '../components/DetailsView';
-import { SettingsView } from '../components/SettingsView';
+import { SettingsView, LogsOverlay } from '../components/SettingsView';
 
 const TAB_CHAT = 0;
 const TAB_DETAILS = 1;
@@ -24,6 +24,8 @@ struct Index {
   @State tab: number = TAB_CHAT;
   @State isWide: boolean = false;
   @State isLandscape: boolean = false;
+  /** A4 运行日志覆盖层开关（设置页入口打开） */
+  @State logsOpen: boolean = false;
   @StorageProp(KEY_THEME) theme: ThemeColors = darkTheme;
   private listener: mediaquery.MediaQueryListener | null = null;
   private landscapeListener: mediaquery.MediaQueryListener | null = null;
@@ -57,26 +59,39 @@ struct Index {
   }
 
   build() {
-    if (this.isWide && this.isLandscape) {
-      Row() {
-        this.sideRail()
-        Column() {
-          this.contentView()
+    Stack() {
+      if (this.isWide && this.isLandscape) {
+        Row() {
+          this.sideRail()
+          Column() {
+            this.contentView()
+          }
+          .layoutWeight(1)
+          .height('100%')
         }
-        .layoutWeight(1)
-        .height('100%')
-      }
-      .width('100%').height('100%').backgroundColor(this.theme.background)
-    } else {
-      Column() {
+        .width('100%').height('100%').backgroundColor(this.theme.background)
+      } else {
         Column() {
-          this.contentView()
+          Column() {
+            this.contentView()
+          }
+          .layoutWeight(1).width('100%')
+          this.bottomNav()
         }
-        .layoutWeight(1).width('100%')
-        this.bottomNav()
+        .width('100%').height('100%').backgroundColor(this.theme.background)
       }
-      .width('100%').height('100%').backgroundColor(this.theme.background)
+
+      if (this.logsOpen) {
+        LogsOverlay({
+          viewModel: this.viewModel,
+          state: this.viewModel.state,
+          onClose: () => {
+            this.logsOpen = false;
+          }
+        })
+      }
     }
+    .width('100%').height('100%').backgroundColor(this.theme.background)
   }
 
   @Builder
@@ -100,6 +115,9 @@ struct Index {
         viewModel: this.viewModel,
         onConfigSaved: () => {
           this.viewModel.onConfigChanged();
+        },
+        onOpenLogs: () => {
+          this.logsOpen = true;
         }
       })
         .visibility(this.tab === TAB_SETTINGS ? Visibility.Visible : Visibility.Hidden)

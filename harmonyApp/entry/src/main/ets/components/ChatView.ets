@@ -38,6 +38,9 @@ export struct ChatView {
   /** 会话抽屉行内重命名（非空 id = 正在编辑该会话标题） */
   @State renameId: string | null = null;
   @State renameText: string = '';
+  /** B1 编辑重发：长按用户气泡 → 对话框预填原文 → 走标准发送链路（历史不删不截断） */
+  @State editTarget: ChatMessage | null = null;
+  @State editText: string = '';
   private scroller: Scroller = new Scroller();
   /** 滚动位置追踪：距底部 ≤2 项视为"贴底"，贴底才自动跟随流式更新；离开后显示"回到底部"悬浮按钮。 */
   @State nearBottom: boolean = true;
@@ -115,6 +118,11 @@ export struct ChatView {
       // 会话抽屉（全屏遮罩）
       if (this.showSessions) {
         this.sessionsDrawer()
+      }
+
+      // B1 编辑重发对话框（全屏遮罩，点遮罩关闭）
+      if (this.editTarget !== null) {
+        this.editDialog()
       }
     }
     .width('100%').height('100%')
@@ -281,6 +289,21 @@ export struct ChatView {
     return m + '分' + Math.round(s % 60) + '秒';
   }
 
+  /** A2 busy 行文本：阶段文案（含实时字数）+ 回合耗时跳动（12s / 2:05，与 Android 同格式） */
+  private busyText(): string {
+    const base = this.state.busyHint.length > 0 ? this.state.busyHint : '回复中…';
+    const sec = this.state.busySec;
+    if (sec <= 0) {
+      return base;
+    }
+    if (sec >= 60) {
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return base + ' · ' + m + ':' + (s < 10 ? '0' + s : '' + s);
+    }
+    return base + ' · ' + sec + 's';
+  }
+
   /** token 用量格式化：↑1.2k ↓3.4k · 12 tok/s（outTok/durationMs 换算） */
   private fmtUsage(m: ChatMessage): string {
     let s = '↑' + this.fmtTok(m.inTok) + ' ↓' + this.fmtTok(m.outTok);
@@ -313,6 +336,10 @@ export struct ChatView {
         .padding(12)
         .borderRadius(12)
         .backgroundColor(this.theme.userBubble)
+        .gesture(LongPressGesture().onAction(() => {
+          this.editTarget = m;
+          this.editText = m.content;
+        }))
       }
       .width('100%')
       .alignItems(HorizontalAlign.End)
@@ -452,10 +479,21 @@ export struct ChatView {
             }, (t: TodoSnapshotItem, idx: number) => m.id + '_' + idx)
           }
         } else if (m.toolResult.length > 0) {
-          Text(m.toolResult).fontSize('11fp')
-            .fontColor(m.toolStatus === 'error' ? this.theme.error : this.theme.textHint)
-            .maxLines(4)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
+          if (this.mcpImageUri(m, m.toolResult).length > 0) {
+            Image(this.mcpImageUri(m, m.toolResult))
+              .objectFit(ImageFit.Cover)
+              .interpolation(ImageInterpolation.High)
+              .width('100%')
+              .constraintSize({ maxHeight: 280 })
+              .borderRadius(8)
+              .backgroundColor(this.theme.surface)
+              .margin({ top: 2 })
+          } else {
+            Text(m.toolResult).fontSize('11fp')
+              .fontColor(m.toolStatus === 'error' ? this.theme.error : this.theme.textHint)
+              .maxLines(4)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+          }
         }
       }
       .constraintSize({ maxWidth: '86%' })
@@ -485,7 +523,7 @@ export struct ChatView {
       // 忙时提示 + k4 排队气泡
       if (this.state.isSending || this.state.busyHint.length > 0) {
         Row({ space: 8 }) {
-          Text(this.state.busyHint.length > 0 ? this.state.busyHint : '回复中…')
+          Text(this.busyText())
             .fontSize('10fp').fontColor(this.theme.textHint)
             .layoutWeight(1)
             .maxLines(1)
@@ -690,6 +728,67 @@ export struct ChatView {
     .margin({ left: 8, right: 8 })
   }
 
+  // ── B1 编辑重发对话框 ───────────────────────────────────────
+
+  @Builder
+  editDialog() {
+    Column() {
+      Column({ space: 10 }) {
+        Text('编辑后重新发送').fontSize('15fp')
+          .fontColor(this.theme.textPrimary).fontWeight(FontWeight.Medium)
+          .width('100%')
+        Text('以新内容走输入框同链路发送；原消息保留在历史中')
+          .fontSize('10fp').fontColor(this.theme.textHint).width('100%')
+        TextArea({ text: this.editText, placeholder: '编辑消息内容…' })
+          .fontSize('14fp')
+          .fontColor(this.theme.textPrimary)
+          .placeholderColor(this.theme.textHint)
+          .backgroundColor(this.theme.surface)
+          .borderRadius(8)
+          .constraintSize({ minHeight: 72, maxHeight: 200 })
+          .width('100%')
+          .padding({ left: 10, right: 10, top: 10, bottom: 10 })
+          .onChange((v: string) => {
+            this.editText = v;
+          })
+        Row({ space: 8 }) {
+          Blank()
+          Text('取消').fontSize('14fp').fontColor(this.theme.textHint)
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.editTarget = null;
+            })
+          Text('发送').fontSize('14fp').fontColor(this.theme.primary)
+            .fontWeight(FontWeight.Medium)
+            .padding({ left: 10, right: 10, top: 6, bottom: 6 })
+            .onClick(() => {
+              const t = this.editText.trim();
+              this.editTarget = null;
+              if (t.length > 0) {
+                this.nearBottom = true;
+                this.viewModel.sendMessage(t);
+                this.scrollToBottomDelayed(180);
+              }
+            })
+        }
+        .width('100%')
+      }
+      .padding(16)
+      .borderRadius(14)
+      .backgroundColor(this.theme.surfaceElevated)
+      .width(300)
+      .onClick(() => {
+      })
+    }
+    .width('100%')
+    .height('100%')
+    .backgroundColor('rgba(0,0,0,0.5)')
+    .justifyContent(FlexAlign.Center)
+    .onClick(() => {
+      this.editTarget = null;
+    })
+  }
+
   // ── 会话抽屉 ────────────────────────────────────────────────
 
   @Builder
@@ -856,6 +955,64 @@ export struct ChatView {
       // 解析失败按无清单处理
     }
     return [];
+  }
+
+  /** A3 MCP 图片工具结果记忆化缓存：行对象 → data URI（''=非图片）。base64 结果 JSON.parse
+   *  昂贵，live 面板 150ms 节流重渲染不能每次解析；行对象身份稳定可作键，容量保护防会话内累积 */
+  private mcpUriCache: Map<Object, string> = new Map();
+
+  private mcpImageUri(owner: Object, result: string): string {
+    if (this.mcpUriCache.has(owner)) {
+      return this.mcpUriCache.get(owner) ?? '';
+    }
+    const uri = this.parseMcpImage(result);
+    if (this.mcpUriCache.size > 200) {
+      this.mcpUriCache.clear();
+    }
+    this.mcpUriCache.set(owner, uri);
+    return uri;
+  }
+
+  /** A3 解析 MCP 图片工具结果：{"content":[{"type":"image","data":"<base64>"}]} → data URI
+   *  （ArkUI Image 原生支持，免异步 PixelMap）。仅认 image/* mime（缺省按 png）；
+   *  非图片/解析失败 → ''（回退纯文本展示）。与 Android decodeMcpImage 同构。 */
+  private parseMcpImage(result: string): string {
+    if (result.length === 0 || result.charCodeAt(0) !== 123) {
+      return '';
+    }
+    try {
+      const root = JSON.parse(result) as Record<string, Object>;
+      const arr = root['content'] as Array<Record<string, Object>>;
+      if (!Array.isArray(arr)) {
+        return '';
+      }
+      for (let i = 0; i < arr.length; i++) {
+        const item = arr[i];
+        if (item['type'] !== 'image') {
+          continue;
+        }
+        const data = item['data'];
+        if (typeof data !== 'string' || data.length === 0) {
+          continue;
+        }
+        const rawMime = item['mimeType'];
+        let mime = typeof rawMime === 'string' ? (rawMime as string) : '';
+        if (mime.length === 0) {
+          const altMime = item['mime'];
+          mime = typeof altMime === 'string' ? (altMime as string) : '';
+        }
+        if (mime.length === 0) {
+          mime = 'image/png';
+        }
+        if (mime.indexOf('image/') !== 0) {
+          continue;
+        }
+        return 'data:' + mime + ';base64,' + data;
+      }
+      return '';
+    } catch (_e) {
+      return '';
+    }
   }
 
   private todoGlyph(status: string): string {
@@ -1421,14 +1578,19 @@ export struct ChatView {
     return picked.length > 60 ? '…' + picked.substring(picked.length - 60) : picked;
   }
 
-  /** 流式答案块：按 (turn,step) 分段归并后整组拼接渲染 + 折叠（流式展开跟随、结束默认收起）；
-   *  展开正文 maxLines 封顶防万字重排卡顿；round 结束后由正式消息气泡接管。 */
-  @Builder
-  answerLiveBlock(segments: LiveItem[], isSending: boolean, key: string) {
+  /** 分段文本归并（answer 段按序拼接；@Builder 体内只允许 UI 组件语法，提取为方法） */
+  private joinLiveText(segments: LiveItem[]): string {
     let text = '';
     for (const s of segments) {
       text += s.text;
     }
+    return text;
+  }
+
+  /** 流式答案块：按 (turn,step) 分段归并后整组拼接渲染 + 折叠（流式展开跟随、结束默认收起）；
+   *  展开正文 maxLines 封顶防万字重排卡顿；round 结束后由正式消息气泡接管。 */
+  @Builder
+  answerLiveBlock(segments: LiveItem[], isSending: boolean, key: string) {
     Column() {
       Row() {
         Text('✍️').fontSize('12fp')
@@ -1439,7 +1601,7 @@ export struct ChatView {
           .margin({ left: 6 })
           .layoutWeight(1)
           .maxLines(1)
-        Text(text.length + ' 字')
+        Text(this.joinLiveText(segments).length + ' 字')
           .fontSize('10fp')
           .fontColor(this.theme.textHint)
           .maxLines(1)
@@ -1456,7 +1618,7 @@ export struct ChatView {
       })
 
       if (this.isLiveOpen(key, isSending)) {
-        Text(isSending ? text + '▍' : text)
+        Text(isSending ? this.joinLiveText(segments) + '▍' : this.joinLiveText(segments))
           .fontSize('13fp')
           .fontColor(this.theme.textPrimary)
           .lineHeight(19)
@@ -1488,6 +1650,12 @@ export struct ChatView {
           Text('●').fontSize('8fp').fontColor(this.theme.warning).margin({ left: 4 })
           Text('▾').fontSize('10fp').fontColor(this.theme.textHint)
         } else {
+          if (tool.durationMs > 0) {
+            Text('⏱ ' + this.fmtDuration(tool.durationMs))
+              .fontSize('10fp')
+              .fontColor(this.theme.textHint)
+              .margin({ left: 6 })
+          }
           Text(this.toolStatusLabel(tool.status))
             .fontSize('10fp')
             .fontColor(this.toolStatusColor(tool.status))
@@ -1506,12 +1674,23 @@ export struct ChatView {
             .width('100%')
         }
         if (tool.result.length > 0) {
-          Text(tool.result)
-            .fontSize('10fp')
-            .fontColor(tool.status === 'error' ? this.theme.error : this.theme.textHint)
-            .maxLines(8)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-            .width('100%')
+          if (this.mcpImageUri(tool, tool.result).length > 0) {
+            Image(this.mcpImageUri(tool, tool.result))
+              .objectFit(ImageFit.Cover)
+              .interpolation(ImageInterpolation.High)
+              .width('100%')
+              .constraintSize({ maxHeight: 280 })
+              .borderRadius(8)
+              .backgroundColor(this.theme.surface)
+              .margin({ top: 2 })
+          } else {
+            Text(tool.result)
+              .fontSize('10fp')
+              .fontColor(tool.status === 'error' ? this.theme.error : this.theme.textHint)
+              .maxLines(8)
+              .textOverflow({ overflow: TextOverflow.Ellipsis })
+              .width('100%')
+          }
         }
       }
     }
@@ -1707,6 +1886,7 @@ export function parseTrace(json: string): LiveItem[] {
         item.args = (o['a'] as string) ?? '';
         item.status = (o['s'] as string) ?? 'ok';
         item.result = (o['r'] as string) ?? '';
+        item.durationMs = (o['ms'] as number) ?? 0;
         out.push(item);
       } else if (k === 'todos') {
         const l = o['l'] as Object[];

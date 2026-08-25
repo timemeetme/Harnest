@@ -67,6 +67,8 @@ export class LiveItem {
   args: string = '';
   status: string = '';
   result: string = '';
+  /** A1 工具执行耗时（毫秒，0=未记录；事件 durationMs 直读，缺省用 tool-start 时刻差值兜底） */
+  durationMs: number = 0;
   todos: TodoSnapshotItem[] = [];
 }
 
@@ -138,9 +140,19 @@ export class UiState {
   bgJobs: BgJobUi[] = [];
   /** 忙时提示条（等待回答/压缩中等；空串=隐藏） */
   busyHint: string = '';
+  /** A2 回合已进行秒数（doSend 期间跳动器每秒更新；busy 行拼「阶段 · 字数 · m:ss」） */
+  busySec: number = 0;
+  /** A4 运行日志环形缓冲（[stream]/[event] 镜像，最近 300 行；LogLineUi.seq 供 ForEach 稳定键） */
+  logLines: LogLineUi[] = [];
   /** 一次性提示（ChatView 渲染 toast 条后由 UI 定时清空） */
   toast: string = '';
   widthClass: WindowWidthClass = WindowWidthClass.Compact;
+}
+
+/** A4 运行日志行（seq 全局递增，环形缓冲 splice 后仍可作 ForEach 稳定键防全列表重渲染） */
+export class LogLineUi {
+  seq: number = 0;
+  text: string = '';
 }
 
 export function computeWidthClass(widthVp: number): WindowWidthClass {

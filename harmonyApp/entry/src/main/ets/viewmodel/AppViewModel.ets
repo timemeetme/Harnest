@@ -2,7 +2,7 @@ import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import {
   UiState, ChatMessage, MessageRole, SessionUi, LiveItem,
-  PendingQuestion, PendingQuestionItem, PendingOption, BgJobUi,
+  PendingQuestion, PendingQuestionItem, PendingOption, BgJobUi, LogLineUi,
 } from '../model/UiModels';
 import { LocalEngine, RoundEvent } from '../service/LocalEngine';
 import {
@@ -55,6 +55,13 @@ export class AppViewModel {
   private answerPendingText: string | null = null;
   private answerPendingTurn: number = 0;
   private answerPendingStep: number = 0;
+  /** A1 工具计时兜底：callId → tool-start 到达时刻（tool-end 事件缺 durationMs 时用差值计算，用毕删除） */
+  private toolStartAt: Map<string, number> = new Map();
+  /** A2 回合耗时跳动器：doSend 期间每秒更新 state.busySec（busy 行拼「阶段 · 字数 · m:ss」） */
+  private busyTickerId: number = -1;
+  private busyStartAt: number = 0;
+  /** A4 运行日志行序号（全局递增，环形缓冲 splice 后仍可作 ForEach 稳定键） */
+  private logSeq: number = 0;
 
   /** Index 启动时调用 */
   init(context: common.Context): void {
@@ -81,6 +88,19 @@ export class AppViewModel {
     // k7e：后台任务镜像
     this.engine.setJobsListener((data: object) => {
       this.applyJobsEvent(data);
+    });
+    // A4 运行日志：桥接 onLog/[event] 镜像 → UiState 环形缓冲（最近 300 行；@Observed 数组
+    // 整体替换触发重渲染，仅 LogsOverlay 读取，聊天面板不受影响）
+    this.engine.setLogLineListener((line: string) => {
+      const entry = new LogLineUi();
+      entry.seq = ++this.logSeq;
+      entry.text = line;
+      const lines = this.state.logLines.slice(0);
+      lines.push(entry);
+      if (lines.length > 300) {
+        lines.splice(0, lines.length - 300);
+      }
+      this.state.logLines = lines;
     });
 
     const records = this.store.loadAll();
@@ -266,6 +286,8 @@ export class AppViewModel {
     this.stopped = false;
     this.state.isSending = true;
     this.state.liveItems = [];
+    this.state.busyHint = '思考中…';
+    this.startBusyTicker();
     const roundStart = Date.now();
     try {
       // 旧会话的 provider 可能已无可用 key（清空 API/换设备后重开历史会话）：
@@ -351,6 +373,7 @@ export class AppViewModel {
       this.flushPendingLive();
       this.state.isSending = false;
       this.state.busyHint = '';
+      this.stopBusyTicker();
       if (this.stopped) {
         // k6：停止 → 清空排队
         const n = this.state.queuedMessages.length;
@@ -805,6 +828,7 @@ export class AppViewModel {
         item.text = text;
         items.push(item);
       }
+      this.state.busyHint = '思考中 · ' + this.liveChars(items, 'think') + ' 字';
     } else if (evt.kind === 'answer') {
       // 流式答案正文：与思考同构按 (turn,step) 分段累积覆盖 + 150ms 节流（Answer 不入
       // trace，最终 assistant 正文即完整形态）
@@ -844,6 +868,7 @@ export class AppViewModel {
         item.text = text;
         items.push(item);
       }
+      this.state.busyHint = '撰写回复 · ' + this.liveChars(items, 'answer') + ' 字';
     } else if (evt.kind === 'tool-start') {
       const item = new LiveItem();
       item.kind = 'tool';
@@ -851,7 +876,11 @@ export class AppViewModel {
       item.name = evt.name ?? 'tool';
       item.args = evt.args ?? '';
       item.status = 'running';
+      if (item.callId !== '') {
+        this.toolStartAt.set(item.callId, Date.now());
+      }
       items.push(item);
+      this.state.busyHint = '执行 ' + item.name + '…';
     } else if (evt.kind === 'tool-end') {
       const callId = evt.callId ?? '';
       let merged = false;
@@ -860,6 +889,7 @@ export class AppViewModel {
           const updated = this.cloneItem(items[i]);
           updated.status = evt.status ?? 'ok';
           updated.result = evt.result ?? '';
+          updated.durationMs = this.resolveToolDuration(callId, evt.durationMs);
           items[i] = updated;
           merged = true;
           break;
@@ -872,6 +902,7 @@ export class AppViewModel {
             const updated = this.cloneItem(items[i]);
             updated.status = evt.status ?? 'ok';
             updated.result = evt.result ?? '';
+            updated.durationMs = this.resolveToolDuration(items[i].callId, evt.durationMs);
             items[i] = updated;
             break;
           }
@@ -899,6 +930,7 @@ export class AppViewModel {
       item.name = evt.label ?? '子代理';
       item.status = evt.phase ?? 'running';
       items.push(item);
+      this.state.busyHint = '子代理 ' + item.name + '…';
     } else if (evt.kind === 'agent-end') {
       // k 子代理结束（按 label 匹配最后一个 subagent 更新 phase/outcome）
       const label = evt.label ?? '';
@@ -958,6 +990,52 @@ export class AppViewModel {
     }
   }
 
+  /** A1 工具耗时：优先事件 durationMs（内核上报），缺省用 tool-start 时刻差值兜底；用毕清理防泄漏 */
+  private resolveToolDuration(callId: string, evtMs?: number): number {
+    const started = this.toolStartAt.get(callId);
+    this.toolStartAt.delete(callId);
+    if (evtMs !== undefined && evtMs > 0) {
+      return evtMs;
+    }
+    return started !== undefined ? Date.now() - started : 0;
+  }
+
+  /** A2 实时字数统计（think/answer 各段文本长度求和，驱动「思考中 · N 字」阶段文案） */
+  private liveChars(items: LiveItem[], kind: string): number {
+    let n = 0;
+    for (const it of items) {
+      if (it.kind === kind) {
+        n += it.text.length;
+      }
+    }
+    return n;
+  }
+
+  /** A2 回合耗时跳动器：doSend 开始启动（幂等）；finally 停止，排队续发按新回合重新计秒 */
+  private startBusyTicker(): void {
+    if (this.busyTickerId >= 0) {
+      return;
+    }
+    this.state.busySec = 0;
+    this.busyStartAt = Date.now();
+    this.busyTickerId = setInterval(() => {
+      this.state.busySec = Math.floor((Date.now() - this.busyStartAt) / 1000);
+    }, 1000);
+  }
+
+  private stopBusyTicker(): void {
+    if (this.busyTickerId >= 0) {
+      clearInterval(this.busyTickerId);
+      this.busyTickerId = -1;
+    }
+    this.state.busySec = 0;
+  }
+
+  /** A4 清空运行日志查看器缓冲（内核仍继续产出新行） */
+  clearLogs(): void {
+    this.state.logLines = [];
+  }
+
   private cloneItem(src: LiveItem): LiveItem {
     const item = new LiveItem();
     item.kind = src.kind;
@@ -968,6 +1046,7 @@ export class AppViewModel {
     item.args = src.args;
     item.status = src.status;
     item.result = src.result;
+    item.durationMs = src.durationMs;
     item.todos = src.todos.slice();
     return item;
   }
@@ -984,7 +1063,7 @@ export class AppViewModel {
       if (it.kind === 'think') {
         arr.push({ 'k': 'think', 't': it.text, 's': it.step, 'u': it.turn });
       } else if (it.kind === 'tool') {
-        arr.push({ 'k': 'tool', 'n': it.name, 'a': it.args, 's': it.status, 'r': it.result });
+        arr.push({ 'k': 'tool', 'n': it.name, 'a': it.args, 's': it.status, 'r': it.result, 'ms': it.durationMs });
       } else if (it.kind === 'steer') {
         arr.push({ 'k': 'steer', 't': it.text });
       } else if (it.kind === 'subagent') {

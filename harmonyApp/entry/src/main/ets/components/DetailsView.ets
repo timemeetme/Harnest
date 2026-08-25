@@ -1,8 +1,80 @@
+import { picker, fileIo } from '@kit.CoreFileKit';
+import { common } from '@kit.AbilityKit';
+import { promptAction } from '@kit.ArkUI';
 import { ThemeColors, darkTheme } from '../theme/Theme';
 import { KEY_THEME } from '../service/AppearanceService';
-import { UiState, ChatMessage, MessageRole, LiveItem } from '../model/UiModels';
+import { UiState, ChatMessage, MessageRole, LiveItem, SessionUi } from '../model/UiModels';
 import { TodoSnapshotItem } from '../service/HarnessNative';
 import { parseTrace } from './ChatView';
+
+/** B2 时间戳辅助：两位补零 */
+function pad2(n: number): string {
+  return n < 10 ? '0' + n.toString() : n.toString();
+}
+
+/** B2 会话导出：按三端统一模板组装 Markdown（用户/助手正文 + 思考与工具折叠块）。 */
+function buildSessionMarkdown(title: string, messages: ChatMessage[]): string {
+  const sb: string[] = [];
+  sb.push('# ' + title);
+  sb.push('');
+  const ts = new Date();
+  sb.push('> Harnest 会话导出 · ' + ts.getFullYear() + '-' + pad2(ts.getMonth() + 1) + '-' + pad2(ts.getDate())
+    + ' ' + pad2(ts.getHours()) + ':' + pad2(ts.getMinutes()));
+  sb.push('');
+  for (const m of messages) {
+    if (m.role === MessageRole.User) {
+      sb.push('## 🧑 用户');
+      sb.push('');
+      sb.push(m.content.trim());
+      sb.push('');
+    } else if (m.role === MessageRole.Assistant) {
+      sb.push('## 🤖 助手');
+      sb.push('');
+      const content = m.content.trim();
+      if (content.length > 0) {
+        sb.push(content);
+        sb.push('');
+      }
+      if (m.traceJson.length > 0) {
+        const items: LiveItem[] = parseTrace(m.traceJson);
+        const thinkTexts: string[] = [];
+        for (const it of items) {
+          if (it.kind === 'think' && it.text.trim().length > 0) {
+            thinkTexts.push(it.text.trim());
+          }
+        }
+        const think = thinkTexts.join('\n\n').trim();
+        if (think.length > 0) {
+          sb.push('<details><summary>💡 思考（' + think.length.toString() + ' 字）</summary>');
+          sb.push('');
+          sb.push(think);
+          sb.push('');
+          sb.push('</details>');
+          sb.push('');
+        }
+        for (const it of items) {
+          if (it.kind === 'tool') {
+            const body = it.result.length > 0 ? it.result : it.args;
+            sb.push('<details><summary>🛠 ' + it.name + ' · ' + it.status + '</summary>');
+            sb.push('');
+            sb.push(body.trim());
+            sb.push('');
+            sb.push('</details>');
+            sb.push('');
+          }
+        }
+      }
+    } else if (m.role === MessageRole.Tool) {
+      sb.push('<details><summary>🛠 ' + (m.toolName ?? '') + ' · ' + (m.toolStatus ?? '') + '</summary>');
+      sb.push('');
+      sb.push((m.toolResult ?? '').trim());
+      sb.push('');
+      sb.push('</details>');
+      sb.push('');
+    }
+  }
+  return sb.join('\n').trimEnd() + '\n';
+}
 
 /**
  * 详情页：回合执行轨迹（Trajectory）。
@@ -17,6 +89,41 @@ export struct DetailsView {
 
   onStateChanged(): void {
     this.scroller.scrollEdge(Edge.Bottom);
+  }
+
+  /** B2 导出可用：非 busy 且有消息（busy 组装中途快照不完整） */
+  private canExport(): boolean {
+    return !this.state.isSending && this.state.messages.length > 0;
+  }
+
+  /** B2 导出会话：DocumentViewPicker 保存 .md（文件名 harnest_日期时间.md） */
+  private async exportMarkdown(): Promise<void> {
+    if (!this.canExport()) {
+      return;
+    }
+    try {
+      const sid = this.state.activeSessionId;
+      const found = sid !== null
+        ? this.state.sessions.find((s: SessionUi) => s.id === sid) : undefined;
+      const title = found !== undefined ? found.title : '会话';
+      const md = buildSessionMarkdown(title, this.state.messages);
+      const ts = new Date();
+      const fname = 'harnest_' + ts.getFullYear() + pad2(ts.getMonth() + 1) + pad2(ts.getDate())
+        + '_' + pad2(ts.getHours()) + pad2(ts.getMinutes());
+      const ctx = getContext(this) as common.UIAbilityContext;
+      const docPicker = new picker.DocumentViewPicker(ctx);
+      const saveOpts: picker.DocumentSaveOptions = { newFileNames: [fname + '.md'] } as picker.DocumentSaveOptions;
+      const uris: string[] = await docPicker.save(saveOpts);
+      if (uris.length === 0) {
+        return;
+      }
+      const fd = fileIo.openSync(uris[0], 0o100 | 0o2);
+      fileIo.writeSync(fd.fd, md);
+      fileIo.closeSync(fd);
+      promptAction.showToast({ message: '导出成功' });
+    } catch (_e) {
+      promptAction.showToast({ message: '导出失败' });
+    }
   }
 
   build() {
@@ -49,6 +156,12 @@ export struct DetailsView {
           .fontColor(this.errorCalls() > 0 ? this.theme.error : this.theme.textHint)
         Text('待办 ' + this.totalTodos().toString()).fontSize('11fp')
           .fontColor(this.theme.textSecondary)
+        Blank()
+        Text('⬇ 导出会话').fontSize('12fp')
+          .fontColor(this.canExport() ? this.theme.primary : this.theme.textHint)
+          .onClick(() => {
+            this.exportMarkdown();
+          })
       }
       .width('100%')
       .padding({ left: 16, right: 16, bottom: 8 })

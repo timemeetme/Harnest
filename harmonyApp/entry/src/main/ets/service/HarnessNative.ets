@@ -208,6 +208,8 @@ export class HarnessNative {
   private early: Map<number, EarlySettle> = new Map();
   private initialized: boolean = false;
   private listener: EngineEventListener | null = null;
+  /** A4 诊断日志行 tap（[stream]/[event] 镜像）→ 运行日志查看器 */
+  private logLineListener: ((line: string) => void) | null = null;
 
   private constructor() {
     this.http = new HttpBridge((fetchId: number, kind: string, a: string, b: string) => {
@@ -231,6 +233,11 @@ export class HarnessNative {
     this.listener = l;
   }
 
+  /** A4 注册诊断日志行监听（引擎启动前调用亦可；回调在 cbs.onLog / dispatchEvent 发射） */
+  setLogLineListener(l: (line: string) => void): void {
+    this.logLineListener = l;
+  }
+
   isReady(): boolean {
     return this.initialized && harness.isReady();
   }
@@ -250,6 +257,9 @@ export class HarnessNative {
     const cbs: NativeCallbacks = {
       onLog: (stream: string, chunk: string) => {
         console.info('[harness:' + stream + '] ' + chunk);
+        if (this.logLineListener !== null) {
+          this.logLineListener('[' + stream + '] ' + chunk);
+        }
       },
       onEvent: (eventJson: string) => {
         this.dispatchEvent(eventJson);
@@ -424,6 +434,9 @@ export class HarnessNative {
   }
 
   private dispatchEvent(eventJson: string): void {
+    if (this.logLineListener !== null) {
+      this.logLineListener('[event] ' + eventJson);
+    }
     if (!this.listener) return;
     try {
       const evt = JSON.parse(eventJson) as Record<string, Object>;

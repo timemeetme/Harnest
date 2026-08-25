@@ -32,6 +32,8 @@ export interface RoundEvent {
   phase?: string;
   /** 子代理执行结果 */
   outcome?: string;
+  /** A1 工具执行耗时（毫秒，tool-end 事件携带；0=未上报） */
+  durationMs?: number;
 }
 
 export class LocalEngine {
@@ -61,6 +63,11 @@ export class LocalEngine {
 
   setLogListener(l: (data: object) => void): void {
     this.logListener = l;
+  }
+
+  /** A4 诊断日志行（[stream]/[event] 镜像）→ 运行日志查看器（透传 HarnessNative） */
+  setLogLineListener(l: (line: string) => void): void {
+    this.native.setLogLineListener(l);
   }
 
   setQuestionListener(l: (data: object) => void): void {

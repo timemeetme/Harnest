@@ -490,13 +490,191 @@ struct MdRich {
   }
 }
 
+/** A5 代码高亮段：关键字 accent / 注释 textHint+斜体 / 字符串 success / 数字 warning / 其余 textPrimary */
+class CodeSeg {
+  text: string = '';
+  color: string = '';
+  italic: boolean = false;
+}
+
+/** A5 语言关键字表（对齐 Android codeKeywords，三端观感一致；json 无关键字） */
+function codeKeywords(lang: string): Set<string> {
+  const l = lang.toLowerCase();
+  if (l === 'kotlin' || l === 'kt') {
+    return new Set<string>([
+      'fun', 'val', 'var', 'class', 'object', 'interface', 'return', 'if', 'else', 'when',
+      'for', 'while', 'import', 'package', 'private', 'public', 'internal', 'data', 'sealed',
+      'suspend', 'companion', 'override', 'null', 'true', 'false', 'this', 'is', 'in', 'as',
+      'try', 'catch', 'finally', 'throw', 'init', 'constructor', 'by', 'lazy',
+    ]);
+  }
+  if (l === 'java') {
+    return new Set<string>([
+      'class', 'interface', 'public', 'private', 'protected', 'static', 'final', 'void',
+      'return', 'if', 'else', 'for', 'while', 'new', 'import', 'package', 'extends',
+      'implements', 'null', 'true', 'false', 'this', 'try', 'catch', 'finally', 'throw',
+      'throws', 'int', 'long', 'double', 'boolean', 'char', 'byte', 'short', 'float',
+    ]);
+  }
+  if (l === 'ts' || l === 'typescript' || l === 'js' || l === 'javascript') {
+    return new Set<string>([
+      'function', 'const', 'let', 'var', 'return', 'if', 'else', 'for', 'while', 'class',
+      'interface', 'type', 'import', 'export', 'from', 'async', 'await', 'new', 'null',
+      'undefined', 'true', 'false', 'this', 'try', 'catch', 'finally', 'throw', 'extends',
+      'implements', 'public', 'private', 'readonly', 'enum', 'switch', 'case', 'break',
+      'default', 'of', 'in',
+    ]);
+  }
+  if (l === 'py' || l === 'python') {
+    return new Set<string>([
+      'def', 'class', 'return', 'if', 'elif', 'else', 'for', 'while', 'import', 'from',
+      'as', 'pass', 'None', 'True', 'False', 'try', 'except', 'finally', 'raise', 'with',
+      'lambda', 'yield', 'global', 'nonlocal', 'in', 'is', 'and', 'or', 'not', 'async', 'await',
+    ]);
+  }
+  if (l === 'json') {
+    return new Set<string>();
+  }
+  if (l === 'bash' || l === 'sh' || l === 'shell' || l === 'zsh') {
+    return new Set<string>([
+      'if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'do', 'done', 'case', 'esac',
+      'in', 'function', 'return', 'local', 'export', 'echo', 'cd', 'ls', 'grep', 'cat',
+    ]);
+  }
+  return new Set<string>([
+    'fun', 'val', 'var', 'class', 'return', 'if', 'else', 'for', 'while', 'import',
+    'function', 'const', 'let', 'def', 'null', 'true', 'false', 'this',
+  ]);
+}
+
+/** A5 token 正则（对齐 Android CODE_TOKEN_RE）：行注释/块注释/# 注释/单双引号字符串（含转义）/数字。
+ *  模块级共享，每次调用前重置 lastIndex。 */
+const CODE_TOKEN_RE =
+  /(\/\/[^\n]*|\/\*[\s\S]*?\*\/|#[^\n]*|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|\b\d+(?:\.\d+)?\b)/g;
+
+function isCodeWordStart(c: string): boolean {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c === '_';
+}
+
+function isCodeWordChar(c: string): boolean {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c === '_';
+}
+
+/** A5 代码 → 高亮段列表（对齐 Android highlightCode + appendPlainSegment）：
+ *  正则 token 化（注释/字符串/数字直接着色）+ token 间纯文本扫关键字；相邻同色段合并压 Span 组件数；
+ *  超长代码（>20000 字符）降级单色，防 Span 爆炸。 */
+function highlightCode(code: string, lang: string, t: ThemeColors): CodeSeg[] {
+  const out: CodeSeg[] = [];
+  if (code.length === 0) {
+    return out;
+  }
+  if (code.length > 20000) {
+    const whole = new CodeSeg();
+    whole.text = code;
+    whole.color = t.textPrimary;
+    out.push(whole);
+    return out;
+  }
+  const keywords = codeKeywords(lang);
+  const mk = (txt: string, color: string, italic: boolean): void => {
+    if (txt.length === 0) {
+      return;
+    }
+    const n = out.length;
+    if (n > 0) {
+      const lastSeg = out[n - 1];
+      if (lastSeg.color === color && lastSeg.italic === italic) {
+        lastSeg.text += txt;
+        return;
+      }
+    }
+    const s = new CodeSeg();
+    s.text = txt;
+    s.color = color;
+    s.italic = italic;
+    out.push(s);
+  };
+  const pushPlain = (seg: string): void => {
+    if (seg.length === 0) {
+      return;
+    }
+    if (keywords.size === 0) {
+      mk(seg, t.textPrimary, false);
+      return;
+    }
+    let i = 0;
+    let plain = '';
+    while (i < seg.length) {
+      if (isCodeWordStart(seg[i])) {
+        let j = i + 1;
+        while (j < seg.length && isCodeWordChar(seg[j])) {
+          j++;
+        }
+        const word = seg.substring(i, j);
+        if (keywords.has(word)) {
+          mk(plain, t.textPrimary, false);
+          plain = '';
+          mk(word, t.accent, false);
+        } else {
+          plain += word;
+        }
+        i = j;
+      } else {
+        plain += seg[i];
+        i++;
+      }
+    }
+    mk(plain, t.textPrimary, false);
+  };
+  CODE_TOKEN_RE.lastIndex = 0;
+  let m = CODE_TOKEN_RE.exec(code);
+  let last = 0;
+  while (m !== null) {
+    const tok = m[0];
+    const start = m.index;
+    if (start > last) {
+      pushPlain(code.substring(last, start));
+    }
+    let color = t.textPrimary;
+    let italic = false;
+    if (tok.startsWith('//') || tok.startsWith('/*') || tok.startsWith('#')) {
+      color = t.textHint;
+      italic = true;
+    } else if (tok.startsWith('"') || tok.startsWith('\'')) {
+      color = t.success;
+    } else {
+      const c0 = tok.charCodeAt(0);
+      if (c0 >= 48 && c0 <= 57) {
+        color = t.warning;
+      }
+    }
+    mk(tok, color, italic);
+    last = start + tok.length;
+    m = CODE_TOKEN_RE.exec(code);
+  }
+  if (last < code.length) {
+    pushPlain(code.substring(last));
+  }
+  return out;
+}
+
 /** 代码块：右上角 lang 标签 + 复制按钮（copied 1.2s 自动复位，对齐 iOS/Android CodeBlock） */
 @Component
 struct MdCode {
-  @Prop code: string = '';
-  @Prop lang: string = '';
+  @Prop @Watch('onCodeChange') code: string = '';
+  @Prop @Watch('onCodeChange') lang: string = '';
   @Prop theme: ThemeColors = new ThemeColors();
   @State copied: boolean = false;
+  /** A5 高亮段（code/lang 变化即重算；流式追加的码块每回合重高亮一次） */
+  @State segs: CodeSeg[] = [];
+
+  aboutToAppear(): void {
+    this.segs = highlightCode(this.code, this.lang, this.theme);
+  }
+
+  onCodeChange(): void {
+    this.segs = highlightCode(this.code, this.lang, this.theme);
+  }
 
   private doCopy(): void {
     try {
@@ -532,11 +710,17 @@ struct MdCode {
         .width('100%')
       }
       Scroll() {
-        Text(this.code)
-          .fontSize('12fp')
-          .fontFamily('monospace')
-          .fontColor(this.theme.textPrimary)
-          .lineHeight(17)
+        Text() {
+          ForEach(this.segs, (s: CodeSeg, idx: number) => {
+            Span(s.text)
+              .fontColor(s.color)
+              .fontStyle(s.italic ? FontStyle.Italic : FontStyle.Normal)
+          }, (s: CodeSeg, idx: number) => idx + '_' + s.text.length + '_' + s.color)
+        }
+        .fontSize('12fp')
+        .fontFamily('monospace')
+        .fontColor(this.theme.textPrimary)
+        .lineHeight(17)
       }
       .constraintSize({ maxHeight: 300 })
       .scrollBar(BarState.Auto)
@@ -546,6 +730,63 @@ struct MdCode {
     .borderRadius(8)
     .backgroundColor(this.theme.background)
     .border({ width: 0.5, color: this.theme.divider })
+  }
+}
+
+/** A6 Markdown 网络图片三态（对齐 Android MarkdownImage）：加载中占位 / 失败回退文本 / 成功出图。
+ *  Image 必须常驻挂载才会发起网络加载（卸掉就死锁），故 Stack 常驻 + 占位层覆盖切态；
+ *  成功态 FillWidth 语义（宽撑满 + 320 封顶）+ alt 说明；ArkUI Image 自带内存缓存。 */
+@Component
+struct MdImage {
+  @Prop url: string = '';
+  @Prop alt: string = '';
+  @Prop theme: ThemeColors = new ThemeColors();
+  @State loadState: string = 'loading'; // loading|ok|fail
+
+  build() {
+    Column({ space: 2 }) {
+      if (this.loadState === 'fail') {
+        Text('🖼 图片加载失败 · ' + this.url)
+          .fontSize('11fp')
+          .fontColor(this.theme.textHint)
+      } else {
+        Stack() {
+          Image(this.url)
+            .objectFit(ImageFit.Cover)
+            .width('100%')
+            .constraintSize({ maxHeight: 320 })
+            .borderRadius(8)
+            .backgroundColor(this.theme.surface)
+            .interpolation(ImageInterpolation.High)
+            .onComplete(() => {
+              this.loadState = 'ok';
+            })
+            .onError(() => {
+              this.loadState = 'fail';
+            })
+          if (this.loadState === 'loading') {
+            Column() {
+              Text('🖼 加载中…')
+                .fontSize('11fp')
+                .fontColor(this.theme.textHint)
+            }
+            .width('100%')
+            .height(120)
+            .borderRadius(8)
+            .backgroundColor(this.theme.surface)
+            .justifyContent(FlexAlign.Center)
+            .alignItems(HorizontalAlign.Center)
+          }
+        }
+        .alignContent(Alignment.Center)
+      }
+      if (this.alt.length > 0 && this.loadState === 'ok') {
+        Text(this.alt)
+          .fontSize('10fp')
+          .fontColor(this.theme.textHint)
+      }
+    }
+    .alignItems(HorizontalAlign.Start)
   }
 }
 
@@ -611,15 +852,7 @@ export struct MarkdownView {
     } else if (b.kind === 'hr') {
       Divider().strokeWidth(0.5).color(this.theme.divider).width(160)
     } else if (b.kind === 'image') {
-      Column({ space: 3 }) {
-        Image(b.url)
-          .objectFit(ImageFit.Contain)
-          .borderRadius(8)
-          .constraintSize({ maxHeight: 260 })
-        if (b.alt.length > 0) {
-          Text(b.alt).fontSize('10fp').fontColor(this.theme.textHint)
-        }
-      }
+      MdImage({ url: b.url, alt: b.alt, theme: this.theme })
     } else {
       MdRich({ src: b.plain, fontSize: this.fontSize, color: this.theme.textPrimary, theme: this.theme })
     }
