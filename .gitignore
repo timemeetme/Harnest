@@ -38,6 +38,7 @@ captures/
 oh_modules/
 .hvigor/
 **/oh-package-lock.json5
+harmonyApp/package-lock.json
 **/.sign/
 harmonyApp/signing/
 

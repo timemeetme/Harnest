@@ -31258,13 +31258,14 @@ ${SUMMARY_OPEN_TAG}` },
     }
   }
   __name(assertTextOnly, "assertTextOnly");
-  function serializeAssistant(message) {
+  function serializeAssistant(message, defaults) {
     const text = flattenText(message.content);
     const reasoning = message.content.filter((block) => block.type === "reasoning").map((block) => block.text).join("");
     const toolCalls = message.content.filter((block) => block.type === "tool-call").map((block) => ({
       id: block.id,
       type: "function",
-      function: { name: block.name, arguments: block.arguments }
+      function: { name: block.name, arguments: block.arguments },
+      ...defaults.toolCallExtras === "google" && block.thoughtSignature !== void 0 ? { extra_content: { google: { thought_signature: block.thoughtSignature } } } : {}
     }));
     return {
       role: "assistant",
@@ -31285,7 +31286,7 @@ ${SUMMARY_OPEN_TAG}` },
     };
   }
   __name(serializeAssistant, "serializeAssistant");
-  function serializeMessages(messages) {
+  function serializeMessages(messages, defaults = {}) {
     const wire = [];
     for (const message of messages) {
       assertTextOnly(message.content);
@@ -31294,7 +31295,7 @@ ${SUMMARY_OPEN_TAG}` },
         continue;
       }
       if (message.role === "assistant") {
-        wire.push(serializeAssistant(message));
+        wire.push(serializeAssistant(message, defaults));
         continue;
       }
       const toolResults = message.content.filter((block) => block.type === "tool-result");
@@ -31319,7 +31320,7 @@ ${SUMMARY_OPEN_TAG}` },
     if (options.system !== void 0) {
       messages.push({ role: "system", content: options.system });
     }
-    messages.push(...serializeMessages(options.messages));
+    messages.push(...serializeMessages(options.messages, defaults));
     const tools = options.tools?.map((tool) => ({
       type: "function",
       function: {
@@ -31334,7 +31335,7 @@ ${SUMMARY_OPEN_TAG}` },
       messages,
       stream: true,
       stream_options: { include_usage: true },
-      ...resolvedThinking.thinking !== void 0 ? { thinking: { type: resolvedThinking.thinking } } : {},
+      ...defaults.emitThinking !== false && resolvedThinking.thinking !== void 0 ? { thinking: { type: resolvedThinking.thinking } } : {},
       ...resolvedThinking.reasoningEffort !== void 0 ? { reasoning_effort: resolvedThinking.reasoningEffort } : {},
       ...tools !== void 0 && tools.length > 0 ? { tools } : {},
       ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
@@ -31618,7 +31619,8 @@ ${value}`, dataLines++;
           type: "tool-call",
           id: CallId(block.callId ?? ""),
           name: block.name ?? "",
-          arguments: block.text
+          arguments: block.text,
+          ...block.thoughtSignature !== void 0 ? { thoughtSignature: block.thoughtSignature } : {}
         };
     }
   }
@@ -31681,6 +31683,9 @@ ${value}`, dataLines++;
         }
         for (const call of delta?.tool_calls ?? []) {
           let block = toolBlocks.get(call.index);
+          if (block !== void 0 && call.id !== void 0 && block.callId !== void 0 && call.id !== block.callId) {
+            block = void 0;
+          }
           if (!block) {
             block = open("tool-call");
             toolBlocks.set(call.index, block);
@@ -31688,6 +31693,8 @@ ${value}`, dataLines++;
           }
           if (call.id !== void 0) block.callId = call.id;
           if (call.function?.name !== void 0) block.name = call.function.name;
+          const signature = call.extra_content?.google?.thought_signature;
+          if (signature !== void 0) block.thoughtSignature = signature;
           const fragment = call.function?.arguments ?? "";
           block.text += fragment;
           yield {
@@ -32769,6 +32776,52 @@ ${value}`, dataLines++;
           presentCall: /* @__PURE__ */ __name((args) => ({ card: "generic", title: `Start background timer ${String(args.seconds)}s`, kind: "execute" }), "presentCall")
         }));
       }
+      {
+        const svc = ctx.get("tools");
+        const bridge = globalThis;
+        svc?.register(defineTool({
+          name: "run_script",
+          description: `Execute a self-written JavaScript snippet in the host app's sandboxed JS engine. Use this when a task needs real computation instead of answering from memory: generating markdown/CSV/JSON reports, batch text transformation, data extraction and aggregation, or fetching and parsing web pages. Sandbox globals: fetch(url, {method, headers, body}) -> Promise<{status, ok, headers, text()}>, readText(path), writeText(path, content) with paths relative to the app sandbox (e.g. "out/report.md"), log(...parts) and console.log(...) to print; the script's return value is sent back as result. Write large outputs to a file with writeText and return only a short summary. Default timeout 60s.`,
+          parameters: {
+            code: { type: "string", required: true, description: "Self-contained JavaScript source (no imports). Plain ES2020; async/await supported." },
+            description: { type: "string", required: true, description: "One-line description of what this script does (shown on the tool card)." },
+            timeoutMs: { type: "integer", description: "Execution timeout in milliseconds (1000-120000; default 60000)." }
+          },
+          output: {
+            schema: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                ok: { type: "boolean", required: true },
+                result: { type: "string", description: "JSON serialization of the script return value (empty if none)." },
+                stdout: { type: "string", required: true, description: "Merged log()/console.log() output." },
+                stdoutTruncated: { type: "boolean", required: true },
+                error: { type: "string", description: "Uncaught error message (present when ok is false)." },
+                timedOut: { type: "boolean", required: true },
+                durationMs: { type: "integer", required: true }
+              }
+            },
+            render: /* @__PURE__ */ __name((_args, value) => [{
+              type: "text",
+              text: `script ${value.ok === true ? "ok" : "failed"} in ${String(value.durationMs ?? "?")}ms${value.stdout ? ` \u2014 ${String(value.stdout).slice(0, 300)}` : ""}${value.ok === true ? "" : ` \u2014 ${String(value.error ?? "error")}`}`
+            }], "render")
+          },
+          async execute(args) {
+            if (typeof bridge.__deviceCall !== "function") {
+              throw new Error("run_script: host script sandbox not available (update the app to enable it)");
+            }
+            const code = String(args.code ?? "");
+            if (code.trim() === "") throw new Error("run_script: code is empty");
+            const timeoutMs = Math.max(1e3, Math.min(12e4, Math.floor(Number(args.timeoutMs) || 6e4)));
+            return await bridge.__deviceCall("runScript", {
+              code,
+              description: String(args.description ?? "script"),
+              timeoutMs
+            });
+          },
+          presentCall: /* @__PURE__ */ __name((args) => ({ card: "generic", title: `Run script \u2014 ${String(args.description ?? "")}`, kind: "execute" }), "presentCall")
+        }));
+      }
       await ctx.plugin(src_default10, {});
       await ctx.plugin(src_exports3, {});
       await ctx.plugin(src_default11, { section: "plan:policy" });
@@ -33198,6 +33251,34 @@ ${value}`, dataLines++;
           ...err.code !== void 0 && err.code !== null ? { code: String(err.code) } : {}
         };
       }
+    }
+    /** 当前会话 token 用量快照（k9 水位条）：TokenMeter.measure 即时计量 +
+     *  contextWindow 决定链（模型级 > provider 级 > 65536，对齐 buildConnection）。
+     *  usageRatio = totalTokens / contextWindow（0-1，宿主按 <50%/<80%/≥80% 染色）；
+     *  baseline 'none'（无请求样本）时 totalTokens 仅含 surface 增量，属正常冷启动态。 */
+    getUsageStats() {
+      if (!this.ctx) throw new Error("HarnessEngine not initialized");
+      const agent = this.agent;
+      if (!agent) throw new Error("No session \u2014 call createSession() first");
+      const meter = this.ctx.get("tokenMeter");
+      if (!meter) throw new Error("tokenMeter service unavailable");
+      const m = meter.measure(agent.session);
+      const num = /* @__PURE__ */ __name((v) => Math.max(0, Math.floor(Number(v) || 0)), "num");
+      const sel = this.selectionRef.current;
+      const profile = this.profiles.get(sel.provider);
+      const model = profile?.models.find((x) => x.id === sel.model);
+      const contextWindow = Math.max(1, Math.floor(Number(model?.contextWindow ?? profile?.contextWindow ?? 65536) || 65536));
+      const total = num(m.totalTokens);
+      return {
+        ok: true,
+        sessionId: this.sessionId,
+        totalTokens: total,
+        surfaceTokens: num(m.surfaceTokens),
+        surfaceDeltaTokens: num(m.surfaceDeltaTokens),
+        baseline: String(m.baseline?.kind ?? "none"),
+        contextWindow,
+        usageRatio: Math.round(total / contextWindow * 1e3) / 1e3
+      };
     }
     /** 切换模型 — 对当前会话的下一条消息生效（installModelSelection 拦截 agent/request） */
     setModel(opts) {

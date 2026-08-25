@@ -583,6 +583,69 @@ export class HarnessEngine {
       }))
     }
 
+    // ── k9 脚本沙箱工具：模型自建 JS 脚本交宿主独立沙箱执行（对齐桌面 dsh 用
+    //    bash/自建脚本完成计算任务的形态；移动端无子进程，宿主用第二个 JS 引擎
+    //    实例 — iOS JavaScriptCore / Android QuickJS / 鸿蒙 QuickJS — 承载）。
+    //    链路复用 device 桥：__deviceCall('runScript', {code, description, timeoutMs})
+    //    → 宿主沙箱（注入 fetch/readText/writeText/log 四 API，路径限 App 沙箱
+    //    目录，超时熔断 + 输出截断）→ 回包 {ok, result, stdout, stdoutTruncated,
+    //    error, timedOut, durationMs}。脚本抛错不 throw（对齐 bash「非零退出报告
+    //    不报错」）：ok:false + error 交模型自行修正脚本；宿主未接入时明示。
+    {
+      const svc = ctx.get('tools') as unknown as { register: (tool: unknown) => unknown } | undefined
+      const bridge = globalThis as unknown as { __deviceCall?: (op: string, args: Record<string, unknown>) => Promise<Record<string, unknown>> }
+      svc?.register(defineTool({
+        name: 'run_script',
+        description: 'Execute a self-written JavaScript snippet in the host app\'s sandboxed JS engine. '
+          + 'Use this when a task needs real computation instead of answering from memory: generating markdown/CSV/JSON reports, '
+          + 'batch text transformation, data extraction and aggregation, or fetching and parsing web pages. '
+          + 'Sandbox globals: fetch(url, {method, headers, body}) -> Promise<{status, ok, headers, text()}>, '
+          + 'readText(path), writeText(path, content) with paths relative to the app sandbox (e.g. "out/report.md"), '
+          + 'log(...parts) and console.log(...) to print; the script\'s return value is sent back as result. '
+          + 'Write large outputs to a file with writeText and return only a short summary. Default timeout 60s.',
+        parameters: {
+          code: { type: 'string', required: true, description: 'Self-contained JavaScript source (no imports). Plain ES2020; async/await supported.' },
+          description: { type: 'string', required: true, description: 'One-line description of what this script does (shown on the tool card).' },
+          timeoutMs: { type: 'integer', description: 'Execution timeout in milliseconds (1000-120000; default 60000).' },
+        },
+        output: {
+          schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              ok: { type: 'boolean', required: true },
+              result: { type: 'string', description: 'JSON serialization of the script return value (empty if none).' },
+              stdout: { type: 'string', required: true, description: 'Merged log()/console.log() output.' },
+              stdoutTruncated: { type: 'boolean', required: true },
+              error: { type: 'string', description: 'Uncaught error message (present when ok is false).' },
+              timedOut: { type: 'boolean', required: true },
+              durationMs: { type: 'integer', required: true },
+            },
+          },
+          render: (_args, value) => [{
+            type: 'text',
+            text: `script ${value.ok === true ? 'ok' : 'failed'} in ${String(value.durationMs ?? '?')}ms`
+              + `${value.stdout ? ` — ${String(value.stdout).slice(0, 300)}` : ''}`
+              + `${value.ok === true ? '' : ` — ${String(value.error ?? 'error')}`}`,
+          }],
+        },
+        async execute(args) {
+          if (typeof bridge.__deviceCall !== 'function') {
+            throw new Error('run_script: host script sandbox not available (update the app to enable it)')
+          }
+          const code = String(args.code ?? '')
+          if (code.trim() === '') throw new Error('run_script: code is empty')
+          const timeoutMs = Math.max(1000, Math.min(120_000, Math.floor(Number(args.timeoutMs) || 60_000)))
+          return await bridge.__deviceCall('runScript', {
+            code,
+            description: String(args.description ?? 'script'),
+            timeoutMs,
+          })
+        },
+        presentCall: args => ({ card: 'generic', title: `Run script — ${String(args.description ?? '')}`, kind: 'execute' }),
+      }))
+    }
+
     // ── k5 交互控制：agent 提问 + Plan 审批。
     //    user-questions 服务持有单一 provider；本引擎即 provider — ask() 把问题经
     //    'question' 事件下发宿主渲染（独立事件类型，不走 round/tool-start — 后者
@@ -1088,6 +1151,44 @@ export class HarnessEngine {
         error: detail,
         ...(err.code !== undefined && err.code !== null ? { code: String(err.code) } : {}),
       }
+    }
+  }
+
+  /** 当前会话 token 用量快照（k9 水位条）：TokenMeter.measure 即时计量 +
+   *  contextWindow 决定链（模型级 > provider 级 > 65536，对齐 buildConnection）。
+   *  usageRatio = totalTokens / contextWindow（0-1，宿主按 <50%/<80%/≥80% 染色）；
+   *  baseline 'none'（无请求样本）时 totalTokens 仅含 surface 增量，属正常冷启动态。 */
+  getUsageStats(): Record<string, unknown> {
+    if (!this.ctx) throw new Error('HarnessEngine not initialized')
+    const agent = this.agent
+    if (!agent) throw new Error('No session — call createSession() first')
+    const meter = this.ctx.get('tokenMeter') as unknown as
+      | {
+          measure: (session: unknown) => {
+            totalTokens?: unknown
+            surfaceTokens?: unknown
+            surfaceDeltaTokens?: unknown
+            baseline?: { kind?: unknown } | undefined
+          }
+        }
+      | undefined
+    if (!meter) throw new Error('tokenMeter service unavailable')
+    const m = meter.measure(agent.session)
+    const num = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0))
+    const sel = this.selectionRef.current
+    const profile = this.profiles.get(sel.provider)
+    const model = profile?.models.find((x) => x.id === sel.model)
+    const contextWindow = Math.max(1, Math.floor(Number(model?.contextWindow ?? profile?.contextWindow ?? 65536) || 65536))
+    const total = num(m.totalTokens)
+    return {
+      ok: true,
+      sessionId: this.sessionId,
+      totalTokens: total,
+      surfaceTokens: num(m.surfaceTokens),
+      surfaceDeltaTokens: num(m.surfaceDeltaTokens),
+      baseline: String(m.baseline?.kind ?? 'none'),
+      contextWindow,
+      usageRatio: Math.round((total / contextWindow) * 1000) / 1000,
     }
   }
 
