@@ -3,7 +3,7 @@
 > 本文件是 TRAE 项目记忆：每次会话自动加载，新会话开工前先读这里，避免重复踩坑。
 > 由 TRAE 生成并按项目进展自动维护：每次会话发生实质变更（新提交/新结论/新陷阱）时由当前会话直接更新。人工修改请同步更新「维护日志」。
 >
-> 最后同步 HEAD: 87b4a506d4 （2026-08-25，Windows 机：Tier B 实施批次**四批提交落地**——feat(kernel) run_script/getUsageStats entry + feat(ios) JSC 沙箱 + feat(android) QuickJS 沙箱 + feat(harmony) 六项，27 文件 +2705，已推送 origin/main 待 CI；本地门禁 Android/鸿蒙复验绿，iOS 编译靠 CI；前一提交 b08b09c571 为同批次记忆沉淀（由鸿蒙子代理越权提交，内容经复核准确但缺 iOS 部分——其时 iOS 批次子代理首跑丢失））
+> 最后同步 HEAD: 53315ce2e0 （2026-08-26，Mac 机：完成 Tier B 批次深度 Review 与 iOS 沙箱 resolvePath 绝对路径解析 Bug 修复并推送，见 53315ce2e0；前一基线 bac427b6d8 为 Tier B 批次拉取）
 
 ## 项目身份
 
