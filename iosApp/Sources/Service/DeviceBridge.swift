@@ -27,15 +27,19 @@ final class PickerLauncher: NSObject, UiLauncher, UIImagePickerControllerDelegat
     private let main = DispatchQueue.main
 
     private func topVC() -> UIViewController? {
-        var top: UIViewController? = nil
-        main.sync {
+        // 主线程直接计算；仅非主线程调用时才 sync 到主队列。
+        // 反例（已修）：无条件 main.sync —— 调用方在 main.async 闭包内再 sync 主队列
+        // 会触发 libdispatch DISPATCH_CLIENT_CRASH（EXC_BREAKPOINT），pick/camera 工具必崩。
+        func compute() -> UIViewController? {
             let window = UIApplication.shared.connectedScenes
                 .compactMap { ($0 as? UIWindowScene)?.keyWindow }
                 .first
-            top = window?.rootViewController
+            var top = window?.rootViewController
             while let p = top?.presentedViewController { top = p }
+            return top
         }
-        return top
+        if Thread.isMainThread { return compute() }
+        return main.sync { compute() }
     }
 
     func takePicture() async -> URL? {
