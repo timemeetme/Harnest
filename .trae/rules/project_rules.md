@@ -177,7 +177,7 @@ Copy-Item tools\harness-transpiler\output\harness.js harmonyApp\entry\src\main\r
 - ✅ **Mac 本地 Android 编译验证**（2026-08-25，f2e4d6d905）：`ANDROID_HOME=~/Library/Android/sdk JAVA_HOME=/opt/homebrew/opt/openjdk@17/... sh ./gradlew -p androidApp :app:compileDebugKotlin --offline -q` 通过（Mac 也有 Android SDK，不必等 CI）；同日 iOS build + XCTest 14/14（iPhone 17e）于 f2e4d6d905 复验通过
 - ✅ **三端 UI 功能一致性矩阵 26 项全对齐**（2026-08-25，f2e4d6d905）：思考分段三级折叠/回复折叠/节流/代码块复制/错误重试/会话重命名/提问卡跳过/清空消息/token 用量/重新生成/回到底部（贴底才跟随）/工具卡展开/steer+subagent 渲染/评分/fork/停止/排队转向/后台任务卡/会话管理/Provider+maxTokens/导入导出/详情页/深色/Markdown 全集
 - ✅ **CI 三端全绿**（2026-08-25，f2e4d6d905）：Build HarmonyOS 2m54s / Build Android 3m33s / Build iOS 9m8s——批次 1-3 的鸿蒙 5 文件 ArkTS 改动经 CI 编译验证通过
-- ✅ **三端 UI 补齐 9 项构建验证**（2026-08-25，c05ac2d9aa 批次）：鸿蒙 hvigorw assembleHap BUILD SUCCESSFUL（2s884ms）+ Android `:app:compileDebugKotlin --offline` 通过（Windows 本地门禁）；CI 侧 Build Android 2m56s ✅ / Build HarmonyOS 2m50s ✅ / Build iOS 进行中（iOS 3 文件 +200 行无本地门禁，全靠此轮 CI）
+- ✅ **三端 UI 补齐 9 项构建验证**（2026-08-25，c05ac2d9aa 批次）：鸿蒙 hvigorw assembleHap BUILD SUCCESSFUL（2s884ms）+ Android `:app:compileDebugKotlin --offline` 通过（Windows 本地门禁）；**CI 三端全绿**：Build Android 2m56s ✅ / Build HarmonyOS 2m50s ✅ / Build iOS ✅（iOS 3 文件 +200 行无本地门禁，全靠 CI 编译验证通过）
 - ⬜ 未验证：kernel.sh/kernel.ps1 内核子模块管理命令；真机回归 NO_ADAPTER 修复（清空 deepseek key 后重开旧会话应回落默认 provider 不报错）；真机回归 max-tokens 修复（deepseek-reasoner 问难题应完整出答案不截断）；真机验证 maxTokens 用户配置生效（设置页填 1024 问长答案应截断、填 65536 应完整）；**真机回归万字思考（deepseek-reasoner 问难题：思考分段折叠应正常分档、刷新不卡死、回合结束不崩溃）**
 
 ## CI 修复史（8 轮迭代，2026-08-22，Windows 端）
