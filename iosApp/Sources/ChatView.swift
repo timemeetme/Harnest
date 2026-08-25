@@ -12,6 +12,8 @@ struct ChatView: View {
     @State private var renameText = ""
     /// 滚动位置追踪：底部锚点距可视区顶 <400pt 视为"贴底"，贴底才自动跟随流式更新；离开后显示"回到底部"悬浮按钮。
     @State private var atBottom = true
+    /// A2：回合耗时跳动器秒数（busy 生命周期内每秒 +1）
+    @State private var busySec = 0
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -47,6 +49,14 @@ struct ChatView: View {
                 if let t = renameTarget { app.renameSession(t.id, title: renameText) }
                 renameTarget = nil
             }
+        }
+        // B1：编辑重发对话框（resendTarget 非 nil 时弹出）
+        .sheet(isPresented: Binding(
+            get: { app.resendTarget != nil },
+            set: { if !$0 { app.resendTarget = nil } }
+        )) {
+            ResendSheet()
+                .presentationDetents([.medium])
         }
     }
 
@@ -371,15 +381,30 @@ struct ChatView: View {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// A2：忙碌阶段 + 回合耗时（base · Ns / m:ss）
+    private var busyText: String {
+        let t = busySec < 60 ? "\(busySec)s" : String(format: "%d:%02d", busySec / 60, busySec % 60)
+        return "\(app.busyHint) · \(t)"
+    }
+
     private var busyBar: some View {
         HStack(spacing: 8) {
             ProgressView()
                 .controlSize(.small)
                 .tint(Theme.primary)
-            Text(app.busyHint)
+            Text(busyText)
                 .font(.system(size: 11))
                 .foregroundStyle(Theme.textSecondary)
             Spacer()
+        }
+        // A2：回合耗时每秒跳动器（busy 翻转时重置归零，视图消失自动取消）
+        .task(id: app.busy) {
+            busySec = 0
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { break }
+                busySec += 1
+            }
         }
     }
 
@@ -509,6 +534,48 @@ struct ChatView: View {
     }
 }
 
+/// B1：编辑重发对话框 — 预填原消息文本，确认后走标准发送链路（不删原消息）。
+private struct ResendSheet: View {
+    @EnvironmentObject var app: AppStore
+    @State private var text = ""
+
+    private var canSend: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("编辑后重新发送")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+            TextEditor(text: $text)
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textPrimary)
+                .frame(maxHeight: .infinity)
+                .padding(8)
+                .background(Theme.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .onAppear { text = app.resendTarget?.content ?? "" }
+            HStack(spacing: 16) {
+                Spacer()
+                Button("取消") { app.resendTarget = nil }
+                    .foregroundStyle(Theme.textSecondary)
+                Button {
+                    let t = text
+                    Task { await app.confirmResend(t) }
+                } label: {
+                    Text("发送")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(canSend ? Theme.primary : Theme.textHint)
+                }
+                .disabled(!canSend)
+                .accessibilityLabel("发送")
+            }
+        }
+        .padding(16)
+    }
+}
+
 // ── message row（user 气泡 / 工具卡 / assistant 气泡） ───────
 
 private struct MessageRow: View {
@@ -526,8 +593,9 @@ private struct MessageRow: View {
     }
 }
 
-/// k4：user 气泡 — 转向注入的消息带 ⚡ 标记。
+/// k4：user 气泡 — 转向注入的消息带 ⚡ 标记；B1 长按编辑重发。
 private struct UserBubble: View {
+    @EnvironmentObject var app: AppStore
     let message: StoredMessage
 
     var body: some View {
@@ -547,6 +615,16 @@ private struct UserBubble: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
+        // B1：长按编辑重发（busy 中隐藏入口）
+        .contextMenu {
+            if !app.busy {
+                Button {
+                    app.startResend(message)
+                } label: {
+                    Label("编辑重发", systemImage: "square.and.pencil")
+                }
+            }
+        }
     }
 }
 
@@ -717,6 +795,14 @@ private struct ToolCard: View {
         return "wrench.and.screwdriver"
     }
 
+    /// A1：工具耗时格式（<1s 毫秒 / <60s 整秒 / 其上 m:ss）
+    static func fmtToolDuration(_ ms: Int64) -> String {
+        if ms < 1000 { return "\(ms)ms" }
+        let sec = Int(ms / 1000)
+        if sec < 60 { return "\(sec)s" }
+        return String(format: "%d:%02d", sec / 60, sec % 60)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
@@ -742,6 +828,11 @@ private struct ToolCard: View {
                     }
                 }
                 Spacer(minLength: 6)
+                if message.durationMs > 0 {
+                    Text("⏱ \(Self.fmtToolDuration(message.durationMs))")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.textHint)
+                }
                 Text(running ? "运行中" : (failed ? "失败" : "完成"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(running ? Theme.warning : (failed ? Theme.error : Theme.success))
@@ -1371,6 +1462,11 @@ private struct LiveToolRow: View {
                         Text("失败")
                             .font(.system(size: 9))
                             .foregroundStyle(Theme.error)
+                    }
+                    if item.durationMs > 0 {
+                        Text("⏱ \(ToolCard.fmtToolDuration(item.durationMs))")
+                            .font(.system(size: 9))
+                            .foregroundStyle(Theme.textHint)
                     }
                 }
                 if !item.args.isEmpty {

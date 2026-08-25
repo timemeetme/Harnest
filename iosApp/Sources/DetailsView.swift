@@ -55,6 +55,20 @@ struct DetailsView: View {
                 statChip("消息", "\(s.messages.count)")
                 statChip("工具调用", "\(toolCount)")
             }
+            // B2：导出会话为 Markdown（busy 中禁用）
+            ShareLink(item: app.exportMarkdown(), subject: Text(s.title)) {
+                HStack(spacing: 4) {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("导出会话")
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Theme.onPrimary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Theme.primary)
+                .clipShape(Capsule())
+            }
+            .disabled(app.busy)
             Text("更新于 \(Self.timeText(s.updatedAt))")
                 .font(.system(size: 10))
                 .foregroundStyle(Theme.textHint)

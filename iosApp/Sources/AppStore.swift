@@ -47,6 +47,9 @@ struct LiveItem: Identifiable {
     var args = ""
     var status = ""
     var result = ""
+    /// A1：工具执行耗时（宿主侧计时 — 内核 tool 事件不携带 durationMs）
+    var durationMs: Int64 = 0
+    var startedAtMs: Int64 = 0
     var todos: [(String, String)] = []
 }
 
@@ -86,6 +89,8 @@ final class AppStore: ObservableObject {
     @Published var planActive = false
     /// 回合实时轨迹（思考段/工具行/转向/子代理/待办），结束后序列化进 traceJson
     @Published var liveItems: [LiveItem] = []
+    /// B1：编辑重发目标（nil = 对话框关闭；确认后走标准 send 链路，不删原消息）
+    @Published var resendTarget: StoredMessage?
     /// 思考文本节流：避免高频 thinking 事件（60ms 一次、万字文本）卡死 UI
     private var thinkThrottleAt: TimeInterval = 0
     private var thinkPending: String?
@@ -233,6 +238,21 @@ final class AppStore: ObservableObject {
             return
         }
         await send(text)
+    }
+
+    /// B1：打开编辑重发对话框（预填原消息文本；busy 中拒绝）。
+    func startResend(_ message: StoredMessage) {
+        guard !busy else {
+            toast("请等待当前回合结束")
+            return
+        }
+        resendTarget = message
+    }
+
+    /// B1：确认编辑重发——以编辑后文本走标准发送链路（busy 时自动排队；不删原消息、不截断历史）。
+    func confirmResend(_ raw: String) async {
+        resendTarget = nil
+        await send(raw)
     }
 
     /// k5 跳过提问：全空 selected 提交（等价"不选直接交卷"，内核按空答案继续）。
@@ -569,6 +589,8 @@ final class AppStore: ObservableObject {
                     refreshSessions()
                 }
                 liveItems.append(LiveItem(kind: .steer, text: text))
+                // A2：转向成功后更新忙碌阶段提示（下一事件到达前 busyBar 保持显示）
+                busyHint = "⚡ 已转向 · 下一 step 注入"
                 toast("⚡ 已转向 · 下一 step 注入")
             } else {
                 toast("内核空闲 — 转向未生效，请直接发送")
@@ -600,6 +622,13 @@ final class AppStore: ObservableObject {
         guard engine.isReady() else {
             toast("内核未启动 — 发送一条消息后再压缩")
             return
+        }
+        // A2：压缩期间占用 busy（busyBar 显示阶段与耗时）
+        busy = true
+        busyHint = "压缩上下文…"
+        defer {
+            busy = false
+            busyHint = ""
         }
         do {
             let res = try await engine.compactNow()
@@ -652,6 +681,8 @@ final class AppStore: ObservableObject {
             if let json = String(data: data, encoding: .utf8) {
                 _ = try await engine.answerQuestion(qid: pq.qid, answersJson: json)
             }
+            // A2：回答提交后回合继续执行，更新忙碌阶段提示
+            busyHint = "已回答 · 继续执行…"
             toast("已提交回答")
         } catch {
             toast("回答提交失败")
@@ -712,6 +743,48 @@ final class AppStore: ObservableObject {
         store.upsert(s)
         currentSession = s
         refreshSessions()
+    }
+
+    /// B2：当前会话导出为 Markdown（用户/助手消息 + 思考与工具折叠块）。
+    func exportMarkdown() -> String {
+        guard let s = currentSession else { return "" }
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd HH:mm"
+        var out = "# \(s.title)\n\n> Harnest 会话导出 · \(df.string(from: Date()))\n\n"
+        for m in s.messages {
+            if m.role == "user" {
+                out += m.steered ? "## 🧑 用户 ⚡\n\n" : "## 🧑 用户\n\n"
+                out += "\(m.content)\n\n"
+            } else if m.role == "tool" {
+                out += Self.exportToolBlock(
+                    name: m.toolName ?? "tool",
+                    status: m.toolStatus ?? "",
+                    args: "",
+                    result: m.toolResult ?? "")
+            } else {
+                out += "## 🤖 助手\n\n"
+                out += m.isError ? "> ⚠️ \(m.content)\n\n" : "\(m.content)\n\n"
+                if let trace = m.traceJson, !trace.isEmpty {
+                    for it in Self.parseTrace(trace) {
+                        if it.kind == .think, !it.text.isEmpty {
+                            out += "<details><summary>💡 思考（\(it.text.count) 字）</summary>\n\(it.text)\n</details>\n\n"
+                        } else if it.kind == .tool {
+                            out += Self.exportToolBlock(name: it.name, status: it.status, args: it.args, result: it.result)
+                        }
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    /// B2：工具调用折叠块（args + 结果摘要）。
+    private static func exportToolBlock(name: String, status: String, args: String, result: String) -> String {
+        var body = ""
+        if !args.isEmpty { body += args + "\n" }
+        if !result.isEmpty { body += result }
+        let st = status.isEmpty ? "ok" : status
+        return "<details><summary>🛠 \(name) · \(st)</summary>\n\(body)\n</details>\n\n"
     }
 
     // ── 内核事件处理 ──────────────────────────────────────────
@@ -813,6 +886,8 @@ final class AppStore: ObservableObject {
             thinkThrottleAt = now
             upsertThink(&items, text: text, turn: turn, step: step,
                         seq: (o["seq"] as? NSNumber)?.intValue ?? 0)
+            // A2：思考字数累计（对齐 Android roundThinkChars）
+            busyHint = "思考中 · \(items.filter { $0.kind == .think }.reduce(0) { $0 + $1.text.count }) 字"
         case "answer":
             // 回复预览：与思考同构按 (turn,step) 分段 upsert（内核段内累积全量）；
             // 同构 150ms 节流——万字回复全量 upsert 重建 AttributedString 与思考卡顿同构
@@ -837,21 +912,27 @@ final class AppStore: ObservableObject {
                 item.text = text
                 items.append(item)
             }
+            // A2：回复字数累计（对齐 Android roundAnswerChars）
+            busyHint = "撰写回复 · \(items.filter { $0.kind == .answer }.reduce(0) { $0 + $1.text.count }) 字"
         case "tool-start":
             var item = LiveItem(kind: .tool)
             item.callId = o["callId"] as? String ?? ""
             item.name = o["name"] as? String ?? "tool"
             item.args = o["args"] as? String ?? ""
             item.status = "running"
+            item.startedAtMs = nowMs()
             items.append(item)
+            busyHint = "执行 \(item.name)…"
         case "tool-end":
             let callId = o["callId"] as? String ?? ""
+            let endAt = nowMs()
             var merged = false
             if !callId.isEmpty {
                 for i in stride(from: items.count - 1, through: 0, by: -1) {
                     if items[i].kind == .tool, items[i].callId == callId {
                         items[i].status = o["status"] as? String ?? "ok"
                         items[i].result = o["result"] as? String ?? ""
+                        if items[i].startedAtMs > 0 { items[i].durationMs = max(0, endAt - items[i].startedAtMs) }
                         merged = true
                         break
                     }
@@ -863,6 +944,7 @@ final class AppStore: ObservableObject {
                     if items[i].kind == .tool, items[i].status == "running" {
                         items[i].status = o["status"] as? String ?? "ok"
                         items[i].result = o["result"] as? String ?? ""
+                        if items[i].startedAtMs > 0 { items[i].durationMs = max(0, endAt - items[i].startedAtMs) }
                         break
                     }
                 }
@@ -884,6 +966,7 @@ final class AppStore: ObservableObject {
             item.name = o["label"] as? String ?? "子代理"
             item.status = o["phase"] as? String ?? "running"
             items.append(item)
+            busyHint = "子代理 \(item.name)…"
         case "agent-end":
             let label = o["label"] as? String ?? ""
             for i in stride(from: items.count - 1, through: 0, by: -1) {
@@ -911,7 +994,7 @@ final class AppStore: ObservableObject {
             case .answer:
                 break // 回复预览不入轨迹：最终 assistant 正文即完整形态
             case .tool:
-                arr.append(["k": "tool", "n": it.name, "a": it.args, "s": it.status, "r": it.result])
+                arr.append(["k": "tool", "n": it.name, "a": it.args, "s": it.status, "r": it.result, "d": it.durationMs])
             case .steer:
                 arr.append(["k": "steer", "t": it.text])
             case .subagent:
@@ -937,11 +1020,13 @@ final class AppStore: ObservableObject {
                 item.turn = (o["u"] as? NSNumber)?.intValue ?? 0
                 out.append(item)
             case "tool":
-                out.append(LiveItem(kind: .tool,
+                var item = LiveItem(kind: .tool,
                                     name: o["n"] as? String ?? "",
                                     args: o["a"] as? String ?? "",
                                     status: o["s"] as? String ?? "",
-                                    result: o["r"] as? String ?? ""))
+                                    result: o["r"] as? String ?? "")
+                item.durationMs = (o["d"] as? NSNumber)?.int64Value ?? 0
+                out.append(item)
             case "steer":
                 out.append(LiveItem(kind: .steer, text: o["t"] as? String ?? ""))
             case "subagent":
