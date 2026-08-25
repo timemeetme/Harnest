@@ -10,9 +10,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -132,6 +134,7 @@ fun ChatView(
     onSteer: (String) -> Unit,
     onCancelQueued: (Int) -> Unit,
     onCompactSession: () -> Unit,
+    onRebootEngine: () -> Unit,
     pendingQuestions: List<PendingQuestion>,
     onSubmitAnswers: (List<PendingAnswer>) -> Unit,
     planActive: Boolean,
@@ -154,6 +157,9 @@ fun ChatView(
     // 重命名对话框状态：目标会话 + 编辑中文本
     var renameTarget by remember { mutableStateOf<SessionRecord?>(null) }
     var renameText by remember { mutableStateOf("") }
+    // B1 编辑重发对话框状态：目标 user 消息 + 编辑中文本
+    var editTarget by remember { mutableStateOf<StoredMessage?>(null) }
+    var editText by remember { mutableStateOf("") }
 
     Box(Modifier.fillMaxSize().background(harnessColors().background)) {
         Column(Modifier.fillMaxSize()) {
@@ -163,6 +169,8 @@ fun ChatView(
                 canCompact = !isSending && messages.isNotEmpty(),
                 planActive = planActive,
                 onTogglePlan = onTogglePlan,
+                canReboot = !isSending,
+                onReboot = onRebootEngine,
                 onTogglePicker = { pickerOpen = !pickerOpen },
                 onOpenDrawer = { drawerOpen = true },
                 onNewSession,
@@ -198,6 +206,10 @@ fun ChatView(
                 onRate = onRate,
                 onCopy = onCopy,
                 onRetry = onRetry,
+                onEditUser = { m ->
+                    editTarget = m
+                    editText = m.content
+                },
                 bgJobs = bgJobs,
                 onKillJob = onKillJob,
             )
@@ -314,6 +326,58 @@ fun ChatView(
                 }
             }
         }
+
+        // B1 编辑重发：长按用户消息 → 编辑原文后走输入框同链路发送（历史不删不截断）
+        editTarget?.let {
+            val fieldColors = harnessColors()
+            Dialog(onDismissRequest = { editTarget = null }) {
+                Column(
+                    Modifier
+                        .width(300.dp)
+                        .background(fieldColors.surfaceElevated, RoundedCornerShape(14.dp))
+                        .padding(16.dp),
+                ) {
+                    Text("编辑后重新发送", color = fieldColors.textPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(10.dp))
+                    BasicTextField(
+                        value = editText,
+                        onValueChange = { editText = it },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 72.dp, max = 200.dp)
+                            .background(fieldColors.surface, RoundedCornerShape(8.dp))
+                            .padding(horizontal = 10.dp, vertical = 10.dp),
+                        textStyle = TextStyle(color = fieldColors.textPrimary, fontSize = 14.sp),
+                        cursorBrush = SolidColor(fieldColors.primary),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.End) {
+                        Text(
+                            "取消",
+                            color = fieldColors.textHint,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .clickable { editTarget = null }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "发送",
+                            color = fieldColors.primary,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier
+                                .clickable {
+                                    val t = editText.trim()
+                                    editTarget = null
+                                    if (t.isNotEmpty()) onSend(t)
+                                }
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -324,6 +388,8 @@ private fun ChatTopBar(
     canCompact: Boolean,
     planActive: Boolean,
     onTogglePlan: () -> Unit,
+    canReboot: Boolean = false,
+    onReboot: () -> Unit = {},
     onTogglePicker: () -> Unit,
     onOpenDrawer: () -> Unit,
     onNewSession: () -> Unit,
@@ -372,6 +438,13 @@ private fun ChatTopBar(
                 Text(" ▾", color = c.textHint, fontSize = 10.sp)
             }
         }
+        // A7 引擎重启：释放并重建内核，重挂载当前会话（busy 中禁用防重入）
+        Box(
+            Modifier
+                .size(40.dp)
+                .clickable(enabled = canReboot, onClick = onReboot),
+            contentAlignment = Alignment.Center,
+        ) { NavText("⟳", 15.sp, if (canReboot) c.textSecondary else c.textHint) }
         // k5 Plan 模式开关：开启后 agent 先产出计划（exit_plan_mode）经提问卡审批，批准才执行
         Box(
             Modifier
@@ -432,6 +505,7 @@ private fun MessageStream(
     onRate: ((StoredMessage, Int) -> Unit)? = null,
     onCopy: ((StoredMessage) -> Unit)? = null,
     onRetry: ((StoredMessage) -> Unit)? = null,
+    onEditUser: ((StoredMessage) -> Unit)? = null,
     bgJobs: List<BgJobView> = emptyList(),
     onKillJob: ((String) -> Unit)? = null,
 ) {
@@ -490,7 +564,7 @@ private fun MessageStream(
             ) {
                 items(messages, key = { it.id }) { m ->
                     when (m.role) {
-                        "user" -> UserBubble(m)
+                        "user" -> UserBubble(m, onEdit = onEditUser)
                         "assistant" -> AssistantBubble(m, onFork = onFork, onRate = onRate, onCopy = onCopy, onRetry = onRetry)
                         "tool" -> ToolCard(m, elevatedBackground = false)
                     }
@@ -541,8 +615,10 @@ private fun MessageStream(
     }
 }
 
+// B1 用户消息长按 → 编辑重发（CombinedClickable 需 foundation 实验 API OptIn）
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun UserBubble(m: StoredMessage) {
+private fun UserBubble(m: StoredMessage, onEdit: ((StoredMessage) -> Unit)? = null) {
     val c = harnessColors()
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Column(horizontalAlignment = Alignment.End) {
@@ -558,6 +634,12 @@ private fun UserBubble(m: StoredMessage) {
                 Modifier
                     .widthIn(max = 300.dp)
                     .background(c.userBubble, RoundedCornerShape(12.dp))
+                    .then(
+                        if (onEdit != null) Modifier.combinedClickable(
+                            onClick = {},
+                            onLongClick = { onEdit(m) },
+                        ) else Modifier
+                    )
                     .padding(12.dp),
             ) {
                 Text(m.content, color = c.textPrimary, fontSize = 15.sp)

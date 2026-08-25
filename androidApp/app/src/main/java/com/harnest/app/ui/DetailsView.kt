@@ -26,9 +26,18 @@ import com.harnest.app.service.StoredMessage
 import com.harnest.app.shared.round.LiveItem
 import com.harnest.app.shared.round.fmtDuration
 import com.harnest.app.shared.round.parseTrace
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
-fun DetailsView(messages: List<StoredMessage>, revision: Int = 0) {
+fun DetailsView(
+    messages: List<StoredMessage>,
+    revision: Int = 0,
+    sessionTitle: String = "会话",
+    isBusy: Boolean = false,
+    onExport: (() -> Unit)? = null,
+) {
     val c = harnessColors()
     // 工具轨迹来源：旧数据为独立 role="tool" 消息；新架构归并进 assistant 消息的 traceJson，此处展开还原。
     // 注意：messages 为原地 add 的 MutableList 实例（引用不变），key 必须含 size 才能在新消息到达后重算
@@ -93,12 +102,21 @@ fun DetailsView(messages: List<StoredMessage>, revision: Int = 0) {
                     .fillMaxWidth()
                     .padding(start = 16.dp, top = 14.dp, bottom = 6.dp),
             )
+            Text(
+                sessionTitle,
+                color = c.textHint,
+                fontSize = 11.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+            )
             Row(
                 Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 2.dp)
                     .padding(bottom = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text("调用 ${traj.size}", color = c.textSecondary, fontSize = 11.sp)
                 Text(
@@ -107,6 +125,17 @@ fun DetailsView(messages: List<StoredMessage>, revision: Int = 0) {
                     fontSize = 11.sp,
                 )
                 Text("待办 $pending", color = c.textSecondary, fontSize = 11.sp)
+                // B2 导出会话：组装 Markdown 拉起系统分享（busy / 空会话禁用）
+                if (onExport != null) {
+                    val canExport = !isBusy && messages.isNotEmpty()
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "⬇ 导出会话",
+                        color = if (canExport) c.primary else c.textHint,
+                        fontSize = 12.sp,
+                        modifier = Modifier.clickable(enabled = canExport, onClick = onExport),
+                    )
+                }
             }
         }
         if (traj.isEmpty()) {
@@ -174,4 +203,46 @@ internal fun pendingTodoCount(messages: List<StoredMessage>): Int {
         }
     }
     return count
+}
+
+/** B2 会话导出：按三端统一模板组装 Markdown（用户/助手正文 + 思考与工具折叠块）。 */
+fun buildSessionMarkdown(title: String, messages: List<StoredMessage>): String {
+    val sb = StringBuilder()
+    sb.append("# ").append(title).append("\n\n")
+    val stamp = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())
+    sb.append("> Harnest 会话导出 · ").append(stamp).append("\n\n")
+    for (m in messages) {
+        when (m.role) {
+            "user" -> {
+                sb.append("## 🧑 用户\n\n").append(m.content.trim()).append("\n\n")
+            }
+            "assistant" -> {
+                sb.append("## 🤖 助手\n\n")
+                val content = m.content.trim()
+                if (content.isNotEmpty()) sb.append(content).append("\n\n")
+                val tj = m.traceJson.orEmpty()
+                if (tj.isNotEmpty()) {
+                    val items = parseTrace(tj)
+                    val think = items.filterIsInstance<LiveItem.Think>()
+                        .joinToString("\n\n") { it.text.trim() }
+                        .trim()
+                    if (think.isNotEmpty()) {
+                        sb.append("<details><summary>💡 思考（").append(think.length).append(" 字）</summary>\n\n")
+                            .append(think).append("\n\n</details>\n\n")
+                    }
+                    for (t in items.filterIsInstance<LiveItem.Tool>()) {
+                        val body = t.result.ifEmpty { t.args }.trim()
+                        sb.append("<details><summary>🛠 ").append(t.name).append(" · ").append(t.status).append("</summary>\n\n")
+                            .append(body).append("\n\n</details>\n\n")
+                    }
+                }
+            }
+            "tool" -> {
+                // 旧架构独立工具消息：同样输出折叠块，保持时间线顺序
+                sb.append("<details><summary>🛠 ").append(m.toolName).append(" · ").append(m.toolStatus).append("</summary>\n\n")
+                    .append(m.toolResult.orEmpty().trim()).append("\n\n</details>\n\n")
+            }
+        }
+    }
+    return sb.toString().trimEnd() + "\n"
 }

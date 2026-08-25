@@ -64,6 +64,7 @@ import com.harnest.app.ui.PendingAnswer
 import com.harnest.app.ui.PendingOption
 import com.harnest.app.ui.BgJobView
 import com.harnest.app.ui.PendingQuestion
+import com.harnest.app.ui.buildSessionMarkdown
 import com.harnest.app.shared.round.LiveItem
 import com.harnest.app.shared.round.RoundEvent
 import com.harnest.app.shared.round.RoundStats
@@ -824,6 +825,63 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** A7 重启内核引擎：释放并重建引擎，重挂载当前会话（挂载前按 NO_ADAPTER 防护惯例校验回落）。 */
+    private fun rebootEngine() {
+        if (busy.value) return
+        scope.launch {
+            busy.value = true
+            busyHint.value = "引擎重启中…"
+            try {
+                LocalEngine.get().dispose()
+                LocalEngine.get().ensureStarted(this@MainActivity)
+                LocalEngine.get().refreshProfiles(this@MainActivity)
+                val session = currentSession.value
+                if (session != null) {
+                    // 旧会话的 provider 可能已无可用 key — 回落默认可用选择（同 sendNow 挂载前校验）
+                    val cfg = ConfigService.get(this@MainActivity)
+                    if (cfg.getConfig(session.provider).optString("apiKey").trim().isEmpty()) {
+                        val def = cfg.getDefaultSelection()
+                        session.provider = def.first
+                        session.model = def.second
+                        session.effort = cfg.getDefaultEffort()
+                    }
+                    SessionStore.get(this@MainActivity).upsert(session)
+                    refreshSessions()
+                    val seedJson = withContext(Dispatchers.IO) {
+                        SessionStore.get(this@MainActivity).readSeedJson(session.id)
+                    }
+                    LocalEngine.get().mountSession(session, seedJson)
+                }
+                toast("内核已重启")
+            } catch (e: Throwable) {
+                toast("重启失败：${e.message ?: e.javaClass.simpleName}")
+            } finally {
+                busy.value = false
+                busyHint.value = ""
+            }
+        }
+    }
+
+    /** B2 导出当前会话为 Markdown 并拉起系统分享。 */
+    private fun exportSessionMarkdown() {
+        val session = currentSession.value
+        if (session == null || session.messages.isEmpty()) {
+            toast("当前会话无消息可导出")
+            return
+        }
+        try {
+            val md = buildSessionMarkdown(session.title, session.messages)
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, md)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, "导出会话"))
+        } catch (e: Throwable) {
+            toast("导出失败：${e.message ?: e.javaClass.simpleName}")
+        }
+    }
+
     /** k5 内核 question 事件 → 提问卡状态：asked 解析 questions 载荷（id/question/
      *  detail/options/multiSelect/intent.plan-review）；answered/cancelled 撤卡。 */
     private fun applyQuestionEvent(o: JSONObject) {
@@ -1303,6 +1361,7 @@ class MainActivity : ComponentActivity() {
             onSteer = { steerMessage(it) },
             onCancelQueued = { cancelQueued(it) },
             onCompactSession = { compactSession() },
+            onRebootEngine = { rebootEngine() },
             onRate = { m, r -> rateMessage(m, r) },
             onFork = { forkFromMessage(it) },
             onCopy = { copyMessage(it) },
@@ -1330,7 +1389,13 @@ class MainActivity : ComponentActivity() {
     private fun DetailsTabContent() {
         busy.value // 订阅回合生命周期：结束后强制重组，让轨迹统计随最新消息重算
         val revision = messagesRev.value
-        DetailsView(messages = currentSession.value?.messages ?: emptyList(), revision = revision)
+        DetailsView(
+            messages = currentSession.value?.messages ?: emptyList(),
+            revision = revision,
+            sessionTitle = currentSession.value?.title ?: "会话",
+            isBusy = busy.value,
+            onExport = { exportSessionMarkdown() },
+        )
     }
 
     @Composable
