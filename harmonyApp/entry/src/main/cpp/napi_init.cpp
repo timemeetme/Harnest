@@ -25,6 +25,7 @@
 #include <memory>
 
 #include "harness_engine.h"
+#include "ScriptEngine.h"
 
 static const char* TAG = "HarnessNapi";
 static harness::HarnessEngine* g_engine = nullptr;
@@ -355,6 +356,11 @@ static napi_value Init(napi_env env, napi_value exports) {
         { "pumpJobs",   nullptr, NativePumpJobs,   nullptr, nullptr, nullptr, napi_default, nullptr },
         { "dispose",    nullptr, NativeDispose,    nullptr, nullptr, nullptr, napi_default, nullptr },
         { "isReady",    nullptr, NativeIsReady,    nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "scriptEngineCreate",        nullptr, script::NativeScriptEngineCreate,        nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "scriptEngineRun",           nullptr, script::NativeScriptEngineRun,           nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "scriptEngineDispose",       nullptr, script::NativeScriptEngineDispose,       nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "scriptEngineFetchDone",     nullptr, script::NativeScriptEngineFetchDone,     nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "scriptEngineSetFetchHandler", nullptr, script::NativeScriptEngineSetFetchHandler, nullptr, nullptr, nullptr, napi_default, nullptr },
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

@@ -1,10 +1,12 @@
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
+import http from '@ohos.net.http';
 import {
   UiState, ChatMessage, MessageRole, SessionUi, LiveItem,
   PendingQuestion, PendingQuestionItem, PendingOption, BgJobUi, LogLineUi,
 } from '../model/UiModels';
 import { LocalEngine, RoundEvent } from '../service/LocalEngine';
+import { HarnessNative } from '../service/HarnessNative';
 import {
   ChatOutcome, ToolCallEntry, TodoSnapshotItem,
   AnswerQuestionItem,
@@ -62,6 +64,8 @@ export class AppViewModel {
   private busyStartAt: number = 0;
   /** A4 运行日志行序号（全局递增，环形缓冲 splice 后仍可作 ForEach 稳定键） */
   private logSeq: number = 0;
+  /** 脚本沙箱 engineId（App 级复用，-1 = 未创建；惰性初始化于首次 runScript） */
+  private scriptEngineId: number = -1;
 
   /** Index 启动时调用 */
   init(context: common.Context): void {
@@ -113,6 +117,84 @@ export class AppViewModel {
       this.createDraftSession();
     }
     this.state.engineStatus = this.engine.isReady() ? '内核就绪' : '内核待命';
+  }
+
+  // ── 脚本沙箱（device runScript — per-instance QuickJS，App 级引擎复用） ──
+
+  /** 惰性初始化：首次 runScript 时创建沙箱引擎 + 注册 fetch handler + 注入 DeviceBridge */
+  private ensureScriptEngine(): void {
+    if (this.scriptEngineId >= 0) {
+      return;
+    }
+    if (this.context === null) {
+      throw new Error('runScript: context not ready');
+    }
+    const native = HarnessNative.getInstance();
+    const id = native.scriptEngineCreate(this.context.filesDir + '/scripts');
+    if (id <= 0) {
+      throw new Error('runScript: script engine create failed');
+    }
+    this.scriptEngineId = id;
+    native.scriptEngineSetFetchHandler(id, this.scriptFetchHandler);
+    native.deviceBridge().setRunScriptExecutor(
+      (source: string, timeoutMs: number): Promise<Record<string, Object>> => this.runScript(source, timeoutMs));
+    hilog.info(DOMAIN, TAG, 'script engine %{public}d ready', id);
+  }
+
+  /** 沙箱 fetch 上行执行（@ohos.net.http，60s 超时；完成即 fetchDone 下行结算） */
+  private scriptFetchHandler = (fetchId: number, url: string, optionsJson: string): void => {
+    let method: http.RequestMethod = http.RequestMethod.GET;
+    let headerRecord: Record<string, string> = {};
+    let bodyStr: string = '';
+    try {
+      const opts = JSON.parse(optionsJson) as Record<string, Object>;
+      const m = opts['method'];
+      if (m === 'POST') {
+        method = http.RequestMethod.POST;
+      } else if (m === 'PUT') {
+        method = http.RequestMethod.PUT;
+      } else if (m === 'DELETE') {
+        method = http.RequestMethod.DELETE;
+      } else if (m === 'HEAD') {
+        method = http.RequestMethod.HEAD;
+      }
+      const h = opts['headers'];
+      if (h !== undefined && h !== null) {
+        headerRecord = h as Record<string, string>;
+      }
+      const b = opts['body'];
+      if (typeof b === 'string') {
+        bodyStr = b;
+      }
+    } catch (e) {
+      // 解析失败按 GET 默认执行
+    }
+    const native = HarnessNative.getInstance();
+    const client = http.createHttp();
+    client.request(url, {
+      method: method,
+      header: headerRecord,
+      extraData: bodyStr.length > 0 ? bodyStr : undefined,
+      connectTimeout: 60000,
+      readTimeout: 60000,
+      expectDataType: http.HttpDataType.STRING,
+    }).then((resp: http.HttpResponse) => {
+      client.destroy();
+      const bodyText = typeof resp.result === 'string' ? resp.result : JSON.stringify(resp.result);
+      native.scriptEngineFetchDone(this.scriptEngineId, fetchId,
+        resp.responseCode >= 200 && resp.responseCode < 300, bodyText);
+    }).catch((e: Error) => {
+      client.destroy();
+      native.scriptEngineFetchDone(this.scriptEngineId, fetchId, false,
+        e.message.length > 0 ? e.message : 'network error');
+    });
+  };
+
+  /** 执行沙箱脚本：envelope JSON → Record（ok/value/error/durationMs/logs） */
+  private async runScript(source: string, timeoutMs: number): Promise<Record<string, Object>> {
+    this.ensureScriptEngine();
+    const envelopeRaw = await HarnessNative.getInstance().scriptEngineRun(this.scriptEngineId, source, timeoutMs);
+    return JSON.parse(envelopeRaw) as Record<string, Object>;
   }
 
   // ── 会话管理 ────────────────────────────────────────────────
@@ -202,6 +284,8 @@ export class AppViewModel {
     this.state.sessions = sessions;
     ConfigService.get().setLastSelection(provider, model, cleanEffort);
     this.engine.applyModel(provider, model, cleanEffort);
+    // 【5】换模型后 contextWindow 变化 → 重刷水位条
+    this.refreshUsageStats();
   }
 
   /** 当前激活会话（无会话或不匹配时 null） */
@@ -374,6 +458,8 @@ export class AppViewModel {
       this.state.isSending = false;
       this.state.busyHint = '';
       this.stopBusyTicker();
+      // 【5】回合结束刷新 token 水位（fire-and-forget，不阻塞排队续发）
+      this.refreshUsageStats();
       if (this.stopped) {
         // k6：停止 → 清空排队
         const n = this.state.queuedMessages.length;
@@ -389,6 +475,31 @@ export class AppViewModel {
   }
 
   // ── k 系列动作 ──────────────────────────────────────────────
+
+  /** 【5】刷新 token 水位条（回合结束/换模型后调；失败静默不干扰主流程） */
+  private async refreshUsageStats(): Promise<void> {
+    try {
+      const s = await this.engine.usageStats();
+      if (s === null || s.ok !== true) {
+        return;
+      }
+      this.state.usageRatio = s.usageRatio;
+      this.state.usageText = this.fmtTokens(s.totalTokens) + '/' + this.fmtTokens(s.contextWindow);
+      this.state.usageCold = s.baseline === 'none';
+    } catch (e) {
+      // 冷启动前（引擎未 boot/无会话）查询失败属正常，保持现值
+    }
+  }
+
+  /** 【5】1024 进制用量文本：1023 → "1023"；12615 → "12.3k"；65536 → "64k" */
+  private fmtTokens(v: number): string {
+    if (v < 1024) {
+      return String(v);
+    }
+    const k = v / 1024;
+    const s = k >= 100 ? String(Math.round(k)) : k.toFixed(1).replace('.0', '');
+    return s + 'k';
+  }
 
   /** k4 转向：进行中的回合注入补充指令（下一 step 边界生效） */
   async steerMessage(text: string): Promise<void> {
@@ -473,6 +584,23 @@ export class AppViewModel {
       await this.engine.setPlanMode(next);
       this.state.planActive = next;
       this.state.toast = next ? '🧭 计划模式已开启' : '🧭 计划模式已关闭';
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : JSON.stringify(e);
+      hilog.error(DOMAIN, TAG, 'setPlanMode failed: %{public}s', msg);
+      this.state.toast = '计划模式切换失败';
+    }
+  }
+
+  /** 【6】/plan on|off 显式设定（k8 同款守卫与反馈） */
+  async setPlan(active: boolean): Promise<void> {
+    if (!this.engine.isReady()) {
+      this.state.toast = '内核未启动 — 发送一条消息后再切换';
+      return;
+    }
+    try {
+      await this.engine.setPlanMode(active);
+      this.state.planActive = active;
+      this.state.toast = active ? '🧭 计划模式已开启' : '🧭 计划模式已关闭';
     } catch (e) {
       const msg = e instanceof Error ? e.message : JSON.stringify(e);
       hilog.error(DOMAIN, TAG, 'setPlanMode failed: %{public}s', msg);

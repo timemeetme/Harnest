@@ -143,6 +143,19 @@ export interface KernelJob {
   status: string;
 }
 
+/** 【5】getUsageStats 返回（内核 TokenMeter 即时计量；contextWindow 决定链对齐 buildConnection） */
+export interface UsageStats {
+  ok: boolean;
+  totalTokens: number;
+  surfaceTokens: number;
+  surfaceDeltaTokens: number;
+  /** 'none'=无请求样本（冷启动）→ 宿主半透明渲染 */
+  baseline: string;
+  contextWindow: number;
+  /** totalTokens/contextWindow，内核四舍五入 3 位 */
+  usageRatio: number;
+}
+
 export class NoArgs {
 }
 
@@ -381,6 +394,36 @@ export class HarnessNative {
   async setPlanMode(active: boolean): Promise<void> {
     const opts: SetPlanModeOpts = { active: active };
     await this.call<object>('setPlanMode', opts);
+  }
+
+  /** 【5】当前会话 token 用量快照（水位条数据源） */
+  async getUsageStats(): Promise<UsageStats> {
+    return await this.call<UsageStats>('getUsageStats', new NoArgs());
+  }
+
+  // ── 脚本沙箱（ScriptEngine — per-instance QuickJS，App 级复用；.so 单点收口） ──
+
+  /** 【4】创建脚本沙箱引擎（返回 engineId，>0 有效；cwd 为沙箱根目录） */
+  scriptEngineCreate(cwd: string): number {
+    const id: number = harness.scriptEngineCreate(cwd);
+    return id;
+  }
+
+  /** 【4】注册沙箱 fetch 上行 handler（内核 fetch() → 宿主网络） */
+  scriptEngineSetFetchHandler(engineId: number,
+    handler: (fetchId: number, url: string, optionsJson: string) => void): void {
+    harness.scriptEngineSetFetchHandler(engineId, handler);
+  }
+
+  /** 【4】执行沙箱脚本（返回 envelope JSON：ok/value|error/durationMs/logs） */
+  async scriptEngineRun(engineId: number, source: string, timeoutMs: number): Promise<string> {
+    const raw: string = await harness.scriptEngineRun(engineId, source, timeoutMs);
+    return raw;
+  }
+
+  /** 【4】沙箱 fetch 下行结算（ok=false 时 body 携带错误文本） */
+  scriptEngineFetchDone(engineId: number, fetchId: number, ok: boolean, body: string): void {
+    harness.scriptEngineFetchDone(engineId, fetchId, ok, body);
   }
 
   /** k7e 查询后台任务列表 */

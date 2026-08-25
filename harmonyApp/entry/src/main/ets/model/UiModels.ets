@@ -144,6 +144,12 @@ export class UiState {
   busySec: number = 0;
   /** A4 运行日志环形缓冲（[stream]/[event] 镜像，最近 300 行；LogLineUi.seq 供 ForEach 稳定键） */
   logLines: LogLineUi[] = [];
+  /** 【5】token 水位条（usageRatio 0~1，0=不渲染；回合结束 refreshUsageStats 刷新） */
+  usageRatio: number = 0;
+  /** 【5】用量文本（如 "12.3k/64k" = totalTokens/contextWindow，1024 进制） */
+  usageText: string = '';
+  /** 【5】内核 baseline=='none'（无请求样本冷启动）→ 水位条半透明 */
+  usageCold: boolean = false;
   /** 一次性提示（ChatView 渲染 toast 条后由 UI 定时清空） */
   toast: string = '';
   widthClass: WindowWidthClass = WindowWidthClass.Compact;

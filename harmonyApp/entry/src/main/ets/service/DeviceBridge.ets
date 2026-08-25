@@ -150,9 +150,31 @@ export class DeviceBridge {
         return this.opGui(args);
       case 'scheduler':
         return this.opScheduler(args);
+      case 'runScript':
+        return this.opRunScript(args);
       default:
         throw new Error('unknown device op: ' + op);
     }
+  }
+
+  // ── runScript（脚本沙箱 — 执行器由 AppViewModel 注入，App 级引擎复用） ──
+
+  private runScriptExecutor: ((source: string, timeoutMs: number) => Promise<Record<string, Object>>) | null = null;
+
+  setRunScriptExecutor(fn: (source: string, timeoutMs: number) => Promise<Record<string, Object>>): void {
+    this.runScriptExecutor = fn;
+  }
+
+  private async opRunScript(args: Record<string, Object>): Promise<Record<string, Object>> {
+    const source = strArg(args, 'source', '');
+    if (source === '') {
+      throw new Error('runScript: source required');
+    }
+    const timeoutMs = numArg(args, 'timeoutMs', 60000);
+    if (this.runScriptExecutor === null) {
+      throw new Error('runScript: sandbox not initialized');
+    }
+    return await this.runScriptExecutor(source, timeoutMs);
   }
 
   // ── status / permissions ───────────────────────────────────
@@ -166,7 +188,7 @@ export class DeviceBridge {
     const out: Record<string, Object> = {};
     out['platform'] = 'harmonyos';
     out['bridge'] = DEVICE_BRIDGE_VERSION;
-    out['capabilities'] = ['contacts', 'calendar', 'clipboard', 'files', 'photos', 'mail', 'call', 'camera', 'recorder', 'app-open', 'network', 'deviceinfo', 'vibrate', 'location', 'settings', 'reminder', 'gui', 'scheduler'];
+    out['capabilities'] = ['contacts', 'calendar', 'clipboard', 'files', 'photos', 'mail', 'call', 'camera', 'recorder', 'app-open', 'network', 'deviceinfo', 'vibrate', 'location', 'settings', 'reminder', 'gui', 'scheduler', 'runScript'];
     out['permissions'] = perms;
     out['note'] = 'gui automation requires enabling Accessibility service in Settings';
     return out;

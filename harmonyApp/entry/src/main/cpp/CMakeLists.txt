@@ -28,6 +28,7 @@ endif()
 add_library(harness_napi SHARED
     harness_engine.cpp
     napi_init.cpp
+    ScriptEngine.cpp
     ${QUICKJS_C_SOURCES}
 )
 

@@ -1,7 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { HarnessNative, ChatOutcome, ProviderCatalogEntry, ModelInput, TodoSnapshotItem,
-  CreateSessionOpts, SteerOutcome, CompactOutcome, AnswerQuestionItem, KernelJob } from './HarnessNative';
+  CreateSessionOpts, SteerOutcome, CompactOutcome, AnswerQuestionItem, KernelJob, UsageStats } from './HarnessNative';
 import { ConfigService } from './ConfigService';
 import { SessionRecord, SessionStore } from './SessionStore';
 
@@ -218,6 +218,14 @@ export class LocalEngine {
       throw new Error('engine not started');
     }
     await this.native.setPlanMode(active);
+  }
+
+  /** 【5】token 用量快照（引擎未就绪返回 null，调用方免 try） */
+  async usageStats(): Promise<UsageStats | null> {
+    if (!this.isReady()) {
+      return null;
+    }
+    return await this.native.getUsageStats();
   }
 
   /** k7e 查询后台任务列表（UI 镜像对账） */

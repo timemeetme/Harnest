@@ -11,7 +11,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
  */
 
 class MdBlock {
-  kind: string = 'para';       // para|heading|code|list|quote|table|hr|image
+  kind: string = 'para';       // para|heading|code|list|quote|table|hr|image|math
   plain: string = '';          // 原始行内文本（渲染与复制源）
   level: number = 0;           // heading 1-4
   code: string = '';
@@ -31,6 +31,8 @@ class MdSpan {
   strike: boolean = false;
   underline: boolean = false;
   color: string = '';
+  math: boolean = false;       // 数学公式降级渲染（monospace+italic+accent，对齐 iOS .math）
+  display: boolean = false;    // 行内 $$ 语义位（行内恒 false；行级展示数学走块级 kind='math'）
 }
 
 function isCjk(ch: string): boolean {
@@ -132,16 +134,33 @@ function parseInline(text: string, t: ThemeColors, bold: boolean, italic: boolea
         }
       }
     }
-    if (ch === '$' && text[i + 1] !== ' ' && text[i + 1] !== undefined) {
+    if (ch === '$' && text[i + 1] === '$') {
+      const close = text.indexOf('$$', i + 2);
+      if (close > i + 2) {
+        flush();
+        const m = new MdSpan();
+        m.text = text.substring(i + 2, close).trim();
+        m.math = true;
+        m.display = false;
+        out.push(m);
+        i = close + 2;
+        continue;
+      }
+      buf += ch;
+      i++;
+      continue;
+    }
+    if (ch === '$') {
       const close = text.indexOf('$', i + 1);
       if (close > i + 1) {
-        const inner = text.substring(i + 1, close);
-        if (inner.indexOf(' ') < 0 || inner.length < 30) {
-          flush();
-          pushStyled(text.substring(i, close + 1), t.accent, false, false);
-          i = close + 1;
-          continue;
-        }
+        flush();
+        const m = new MdSpan();
+        m.text = text.substring(i + 1, close).trim();
+        m.math = true;
+        m.display = false;
+        out.push(m);
+        i = close + 1;
+        continue;
       }
     }
     if (ch === '@' && mentionOk(text, i)) {
@@ -214,6 +233,15 @@ function parseBlocks(md: string, t: ThemeColors): MdBlock[] {
     const line = lines[i];
     const trimmed = line.trim();
     if (trimmed.length === 0) {
+      i++;
+      continue;
+    }
+    // 行级展示数学：整行 $$...$$ → 居中大字等宽块（对齐 iOS L143-150）
+    if (trimmed.startsWith('$$') && trimmed.endsWith('$$') && trimmed.length > 4) {
+      const b = mk();
+      b.kind = 'math';
+      b.plain = trimmed.substring(2, trimmed.length - 2).trim();
+      blocks.push(b);
       i++;
       continue;
     }
@@ -338,7 +366,7 @@ function parseBlocks(md: string, t: ThemeColors): MdBlock[] {
       const next = lines[i];
       const nt = next.trim();
       if (nt.length === 0 || nt.startsWith('```') || nt.startsWith('#') || nt.startsWith('>')
-        || nt.startsWith('|') || nt.startsWith('---') || nt.startsWith('***')
+        || nt.startsWith('|') || nt.startsWith('---') || nt.startsWith('***') || nt.startsWith('$$')
         || /^(\s*)([-*+]|\d+[.)])\s+/.test(next) || /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.test(nt)) {
         break;
       }
@@ -474,10 +502,11 @@ struct MdRich {
     Text() {
       ForEach(this.segs, (s: MdSpan, idx: number) => {
         Span(s.text)
-          .fontSize(this.fontSize)
-          .fontColor(s.color.length > 0 ? s.color : this.color)
+          .fontSize(s.math ? Math.round(this.fontSize * 0.92) : this.fontSize)
+          .fontColor(s.math ? this.theme.accent : (s.color.length > 0 ? s.color : this.color))
           .fontWeight(s.bold ? FontWeight.Bold : FontWeight.Normal)
-          .fontStyle(s.italic ? FontStyle.Italic : FontStyle.Normal)
+          .fontStyle((s.math || s.italic) ? FontStyle.Italic : FontStyle.Normal)
+          .fontFamily(s.math ? 'monospace' : 'sans-serif')
           .decoration({
             type: s.strike ? TextDecorationType.LineThrough
               : (s.underline ? TextDecorationType.Underline : TextDecorationType.None)
@@ -853,6 +882,17 @@ export struct MarkdownView {
       Divider().strokeWidth(0.5).color(this.theme.divider).width(160)
     } else if (b.kind === 'image') {
       MdImage({ url: b.url, alt: b.alt, theme: this.theme })
+    } else if (b.kind === 'math') {
+      Row() {
+        Text(b.plain)
+          .fontSize(15)
+          .fontFamily('monospace')
+          .fontStyle(FontStyle.Italic)
+          .fontColor(this.theme.accent)
+      }
+      .width('100%')
+      .justifyContent(FlexAlign.Center)
+      .padding({ top: 2, bottom: 2 })
     } else {
       MdRich({ src: b.plain, fontSize: this.fontSize, color: this.theme.textPrimary, theme: this.theme })
     }

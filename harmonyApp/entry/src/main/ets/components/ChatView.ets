@@ -35,6 +35,8 @@ export struct ChatView {
   @State qSel: Record<string, string[]> = {};
   /** k5 提问卡自由文本（questionId → 输入） */
   @State qCustom: Record<string, string> = {};
+  /** k5 提问卡分页：每页 3 题，pageIdx 为当前页（0 起） */
+  @State pageIdx: number = 0;
   /** 会话抽屉行内重命名（非空 id = 正在编辑该会话标题） */
   @State renameId: string | null = null;
   @State renameText: string = '';
@@ -512,12 +514,41 @@ export struct ChatView {
 
   // ── 输入区 ──────────────────────────────────────────────────
 
+  /** 【5】水位条染色：<0.5 主题色 / <0.8 警告黄 / ≥0.8 红 */
+  private usageBarColor(): string {
+    const r = this.state.usageRatio;
+    if (r < 0.5) {
+      return this.theme.primary;
+    }
+    if (r < 0.8) {
+      return this.theme.warning;
+    }
+    return '#E53935';
+  }
+
   @Builder
   inputArea() {
     Column({ space: 6 }) {
       // k5 提问卡（等待用户回答 — 悬浮于输入区上方，不随列表滚动）
       if (this.state.pendingQuestion !== null) {
         this.questionCard()
+      }
+
+      // 【5】token 水位条（回合结束刷新；ratio 0=隐藏；冷启动 baseline none 半透明）
+      if (this.state.usageRatio > 0) {
+        Row({ space: 6 }) {
+          Progress({ value: Math.min(this.state.usageRatio, 1) * 100, total: 100, type: ProgressType.Linear })
+            .height(3)
+            .layoutWeight(1)
+            .color(this.usageBarColor())
+            .backgroundColor(this.theme.divider)
+            .opacity(this.state.usageCold ? 0.5 : 1)
+          Text(this.state.usageText)
+            .fontSize('9fp')
+            .fontColor(this.theme.textHint)
+            .opacity(this.state.usageCold ? 0.5 : 1)
+        }
+        .width('100%')
       }
 
       // 忙时提示 + k4 排队气泡
@@ -543,7 +574,8 @@ export struct ChatView {
       }
 
       Row({ space: 8 }) {
-        TextArea({ text: this.inputText, placeholder: this.state.isSending ? '输入 ⚡ 转向指令或排队消息…' : '发送消息…' })
+        TextArea({ text: this.inputText, placeholder: this.state.isSending ? '输入 ⚡ 转向指令或排队消息…'
+          : (this.inputText.length > 0 && this.inputText.startsWith('/') ? '⌘ /plan — 切换规划模式' : '发送消息…') })
           .fontSize('15fp')
           .fontColor(this.theme.textPrimary)
           .placeholderColor(this.theme.textHint)
@@ -902,6 +934,19 @@ export struct ChatView {
     if (text.trim().length === 0) {
       return;
     }
+    // 【6】/plan 斜杠命令前置拦截（不进发送链路）：裸命令翻转、on/off 显式
+    const t = text.trim();
+    if (t === '/plan' || t === '/plan on' || t === '/plan off') {
+      this.inputText = '';
+      if (t === '/plan on') {
+        this.viewModel.setPlan(true);
+      } else if (t === '/plan off') {
+        this.viewModel.setPlan(false);
+      } else {
+        this.viewModel.togglePlan();
+      }
+      return;
+    }
     this.inputText = '';
     this.liveExpanded = {};
     this.viewModel.sendMessage(text);
@@ -1143,7 +1188,7 @@ export struct ChatView {
       Text(this.state.pendingQuestion?.planReview === true ? '🧭 计划待审批' : '❓ 等待你的回答')
         .fontSize('13fp').fontColor(this.theme.warning).fontWeight(FontWeight.Medium)
 
-      ForEach(this.state.pendingQuestion?.questions ?? [], (q: PendingQuestionItem) => {
+      ForEach(this.pageQuestions(), (q: PendingQuestionItem) => {
         Column({ space: 5 }) {
           Row({ space: 6 }) {
             Text(q.header.length > 0 ? q.header : '问题 ' + (q.id + 1))
@@ -1167,7 +1212,7 @@ export struct ChatView {
 
           ForEach(q.options, (opt: PendingOption, oi: number) => {
             Row({ space: 6 }) {
-              Text(this.qSel[q.id.toString()]?.indexOf(opt.label) >= 0 ? '☑' : '☐')
+              Text(this.optIcon(q, opt.label))
                 .fontSize('13fp')
                 .fontColor(this.qSel[q.id.toString()]?.indexOf(opt.label) >= 0
                   ? this.theme.primary : this.theme.textHint)
@@ -1218,6 +1263,30 @@ export struct ChatView {
         .padding({ top: 4, bottom: 4 })
       }, (q: PendingQuestionItem) => 'pq_' + q.id)
 
+      if (this.qPageCount() > 1) {
+        Row({ space: 14 }) {
+          Text('‹')
+            .fontSize('16fp')
+            .fontColor(this.qPage() > 0 ? this.theme.textPrimary : this.theme.textHint)
+            .padding({ left: 12, right: 12, top: 2, bottom: 2 })
+            .onClick(() => {
+              this.goPage(this.qPage() - 1);
+            })
+          Text((this.qPage() + 1) + ' / ' + this.qPageCount())
+            .fontSize('11fp')
+            .fontColor(this.theme.textSecondary)
+          Text('›')
+            .fontSize('16fp')
+            .fontColor(this.qPage() < this.qPageCount() - 1 ? this.theme.textPrimary : this.theme.textHint)
+            .padding({ left: 12, right: 12, top: 2, bottom: 2 })
+            .onClick(() => {
+              this.goPage(this.qPage() + 1);
+            })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+      }
+
       Row({ space: 8 }) {
         Button('跳过')
           .fontSize('13fp')
@@ -1227,18 +1296,22 @@ export struct ChatView {
           .height(36)
           .layoutWeight(1)
           .onClick(() => {
+            this.pageIdx = 0;
             this.viewModel.skipPendingQuestion();
           })
-        Button('提交回答')
-          .fontSize('13fp')
-          .fontColor(this.theme.primaryOn)
-          .backgroundColor(this.theme.primary)
-          .borderRadius(8)
-          .height(36)
-          .layoutWeight(1)
-          .onClick(() => {
-            this.submitAnswers();
-          })
+        if (this.qPage() >= this.qPageCount() - 1) {
+          Button('提交回答')
+            .fontSize('13fp')
+            .fontColor(this.allAnswered() ? this.theme.primaryOn : this.theme.textHint)
+            .backgroundColor(this.allAnswered() ? this.theme.primary : this.theme.surface)
+            .borderRadius(8)
+            .height(36)
+            .layoutWeight(1)
+            .enabled(this.allAnswered())
+            .onClick(() => {
+              this.submitAnswers();
+            })
+        }
       }
       .width('100%')
     }
@@ -1247,6 +1320,54 @@ export struct ChatView {
     .borderRadius(12)
     .backgroundColor(this.theme.surfaceElevated)
     .border({ width: 0.5, color: this.theme.divider })
+  }
+
+  /** k5 分页：每页 3 题 */
+  private qPageCount(): number {
+    const total = this.state.pendingQuestion?.questions.length ?? 0;
+    return total <= 0 ? 1 : Math.ceil(total / 3);
+  }
+
+  /** k5 当前页（钳制到合法范围，防止题数变化后越界） */
+  private qPage(): number {
+    return Math.max(0, Math.min(this.pageIdx, this.qPageCount() - 1));
+  }
+
+  /** k5 当前页的题目切片（key 用全局 q.id，跨页稳定） */
+  private pageQuestions(): PendingQuestionItem[] {
+    const qs = this.state.pendingQuestion?.questions ?? [];
+    const start = this.qPage() * 3;
+    return qs.slice(start, start + 3);
+  }
+
+  /** k5 翻页（写入时钳制） */
+  private goPage(p: number): void {
+    this.pageIdx = Math.max(0, Math.min(p, this.qPageCount() - 1));
+  }
+
+  /** k5 选项图标双态：单选 ○/●，多选 ☐/☑ */
+  private optIcon(q: PendingQuestionItem, label: string): string {
+    const picked = (this.qSel[q.id.toString()] ?? []).indexOf(label) >= 0;
+    if (q.multiSelect) {
+      return picked ? '☑' : '☐';
+    }
+    return picked ? '●' : '○';
+  }
+
+  /** k5 提交门禁：每题已选选项或已填自定义文本才算全部作答 */
+  private allAnswered(): boolean {
+    const pq = this.state.pendingQuestion;
+    if (pq === null) {
+      return false;
+    }
+    for (const q of pq.questions) {
+      const sel = this.qSel[q.id.toString()] ?? [];
+      const cust = (this.qCustom[q.id.toString()] ?? '').trim();
+      if (sel.length === 0 && cust.length === 0) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /** k5 选项点选（单选互斥 / 多选切换），整体替换 qSel 触发刷新 */
@@ -1299,6 +1420,7 @@ export struct ChatView {
     }
     this.qSel = {};
     this.qCustom = {};
+    this.pageIdx = 0;
     this.viewModel.answerPendingQuestion(picks);
   }
 
