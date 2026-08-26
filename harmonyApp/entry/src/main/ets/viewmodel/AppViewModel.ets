@@ -512,18 +512,25 @@ export class AppViewModel {
 
   // ── k 系列动作 ──────────────────────────────────────────────
 
-  /** 【5】刷新 token 水位条（回合结束/换模型后调；失败静默不干扰主流程） */
+  /** 【5】刷新 token 水位条（回合结束/换模型后调；失败不干扰主流程）。
+   * 注意：失败 / ok!==true / 抛异常 **都要主动清零**，否则报错后
+   * 旧 usage 值（如 10.5k/65.5k）会一直停留在 UI 上，表象"卡住"。 */
   private async refreshUsageStats(): Promise<void> {
     try {
       const s = await this.engine.usageStats();
       if (s === null || s.ok !== true) {
+        this.state.usageRatio = 0;
+        this.state.usageText = '';
+        this.state.usageCold = true;
         return;
       }
       this.state.usageRatio = s.usageRatio;
       this.state.usageText = this.fmtTokens(s.totalTokens) + '/' + this.fmtTokens(s.contextWindow);
       this.state.usageCold = s.baseline === 'none';
     } catch (e) {
-      // 冷启动前（引擎未 boot/无会话）查询失败属正常，保持现值
+      this.state.usageRatio = 0;
+      this.state.usageText = '';
+      this.state.usageCold = true;
     }
   }
 

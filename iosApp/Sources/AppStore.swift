@@ -309,8 +309,16 @@ final class AppStore: ObservableObject {
     /// Tier B：拉取 token 用量快照驱动水位条（回合结束 / 会话挂载 / 换模型时调用）。
     /// 内核返回 {ok, totalTokens, baseline("none"/"estimated"/"usage"), contextWindow, ...}；
     /// baseline == "none" 为冷启动（无计量数据），水位条半透明提示。
+    /// 注意：失败或 ok=false 时**主动清空** usageText/usageRatio，避免报错后
+    /// 旧值停留表象（例如 10.5k/65.5k 卡住）——busy 已在 finishRound 复位，但
+    /// 旧 token 快照若不主动清空会一直挂在 UI 上。
     func refreshUsageStats() async {
-        guard let stats = engine.usageStats(), stats["ok"] as? Bool == true else { return }
+        guard let stats = engine.usageStats(), stats["ok"] as? Bool == true else {
+            usageRatio = 0
+            usageText = ""
+            usageCold = true
+            return
+        }
         let total = (stats["totalTokens"] as? NSNumber)?.doubleValue ?? 0
         let window = (stats["contextWindow"] as? NSNumber)?.doubleValue ?? 0
         usageCold = (stats["baseline"] as? String ?? "none") == "none"
@@ -326,15 +334,23 @@ final class AppStore: ObservableObject {
     }
 
     /// Provider catalog for the model picker — kernel list, fallback to local config.
+    /// 防御兜底：内核 listProviders 为空（如报错后内核状态异常、JS 侧 parse 失败）时，
+    /// 本地 Config 兜底；若某 provider 的本地 models/defaultModel 都空，再 fallback 到
+    /// Providers.metaOf 默认模型——确保至少显示 1 条，避免"页面全空"。
     func providerCatalog() -> [[String: Any]] {
         let list = engine.listProviders()
         if !list.isEmpty { return list }
         var out: [[String: Any]] = []
         for item in config.listUsableProviders() {
+            let provider = item["provider"] as? String ?? ""
             var models = LocalEngine.stringListAny(item["models"])
             if models.isEmpty { models = [(item["defaultModel"] as? String ?? "")].filter { !$0.isEmpty } }
+            if models.isEmpty, let meta = Providers.metaOf(provider) {
+                let dm = meta.defaultModel; if !dm.isEmpty { models = [dm] }
+            }
+            guard !models.isEmpty else { continue }
             out.append([
-                "provider": item["provider"] as? String ?? "",
+                "provider": provider,
                 "baseUrl": item["baseUrl"] as? String ?? "",
                 "models": models.map { ["id": $0] as [String: Any] },
             ])
