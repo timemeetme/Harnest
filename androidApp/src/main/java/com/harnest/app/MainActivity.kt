@@ -45,7 +45,7 @@ class MainActivity : ComponentActivity() {
                         kotlinx.coroutines.delay(1500)
                         viewModel.connectKernel(
                             com.harnest.app.platform.defaultKernelHost(),
-                            3080, false, "deepseek", "deepseek-chat"
+                            3080, false, "deepseek", "deepseek-v4-flash"
                         )
                     }
 

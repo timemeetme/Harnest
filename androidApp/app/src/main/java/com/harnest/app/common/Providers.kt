@@ -27,46 +27,46 @@ object Providers {
     val META: LinkedHashMap<String, ProviderMeta> = linkedMapOf(
         DEEPSEEK to ProviderMeta(
             DEEPSEEK, "DeepSeek", "https://api.deepseek.com",
-            "deepseek-chat", listOf("deepseek-chat", "deepseek-reasoner"),
+            "deepseek-v4-flash", listOf("deepseek-v4-flash", "deepseek-v4-pro"),
             "https://platform.deepseek.com/api_keys"
         ),
         QWEN to ProviderMeta(
             QWEN, "千问 Qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1",
             "qwen-plus",
-            listOf("qwen3-max", "qwen-plus", "qwen-flash", "qwen-turbo", "qwen3-coder-plus", "qwq-plus"),
+            listOf("qwen3.8-max", "qwen3.7-plus", "qwen3.7-flash", "qwen-plus", "qwen-flash"),
             "https://bailian.console.aliyun.com/"
         ),
         DOUBAO to ProviderMeta(
             DOUBAO, "豆包 Doubao", "https://ark.cn-beijing.volces.com/api/v3",
-            "doubao-seed-1.6-251015",
+            "doubao-seed-2.1-pro",
             listOf(
-                "doubao-seed-1.6-251015", "doubao-seed-1.6-lite-251015", "doubao-seed-1-6-250615",
-                "doubao-1.5-pro-32k-250115", "doubao-1.5-thinking-pro-250415"
+                "doubao-seed-2.1-pro", "doubao-seed-2.1-turbo", "doubao-seed-2.0-pro",
+                "doubao-seed-2.0-lite", "doubao-seed-2.0-mini"
             ),
             "https://console.volcengine.com/ark"
         ),
         ZHIPU to ProviderMeta(
             ZHIPU, "智谱 按量付费", "https://open.bigmodel.cn/api/paas/v4",
-            "glm-4.6",
-            listOf("glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.6", "glm-4.5", "glm-4.5-air"),
+            "glm-5.3",
+            listOf("glm-5.3", "glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.6", "glm-4.5-air"),
             "https://open.bigmodel.cn/"
         ),
         ZHIPU_CODING to ProviderMeta(
             ZHIPU_CODING, "智谱 Coding Plan", "https://open.bigmodel.cn/api/coding/paas/v4",
-            "glm-4.7",
-            listOf("glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.6", "glm-4.5"),
+            "glm-5.3",
+            listOf("glm-5.3", "glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.6"),
             "https://open.bigmodel.cn/"
         ),
         MOONSHOT to ProviderMeta(
             MOONSHOT, "Kimi 月之暗面", "https://api.moonshot.cn/v1",
-            "kimi-k2-0905-preview",
-            listOf("kimi-k2-0905-preview", "kimi-k2-turbo-preview", "kimi-latest"),
-            "https://platform.moonshot.cn/"
+            "kimi-k3",
+            listOf("kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"),
+            "https://platform.kimi.com/"
         ),
         OPENAI to ProviderMeta(
             OPENAI, "OpenAI", "https://api.openai.com/v1",
-            "gpt-4.1-mini",
-            listOf("gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "o3-mini", "o4-mini"),
+            "gpt-5.6-luna",
+            listOf("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"),
             "https://platform.openai.com/api-keys"
         ),
         GEMINI to ProviderMeta(

@@ -54,12 +54,10 @@ val PROVIDER_META: Map<String, ProviderMeta> = mapOf(
         emoji = "🧠",
         protocol = ApiProtocol.OPENAI,
         baseUrl = "https://api.deepseek.com/v1",
-        defaultModel = "deepseek-chat",
+        defaultModel = "deepseek-v4-flash",
         models = listOf(
-            "deepseek-chat",
-            "deepseek-reasoner",
-            "deepseek-chat-latest",
-            "deepseek-reasoner-latest",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
         )
     ),
     AiProvider.DOUBAO.value to ProviderMeta(
@@ -68,12 +66,13 @@ val PROVIDER_META: Map<String, ProviderMeta> = mapOf(
         emoji = "🫘",
         protocol = ApiProtocol.OPENAI,
         baseUrl = "https://ark.cn-beijing.volces.com/api/v3",
-        defaultModel = "doubao-seed-1.6-251015",
+        defaultModel = "doubao-seed-2.1-pro",
         models = listOf(
-            "doubao-seed-1.6-251015",
-            "doubao-seed-1.6-lite-251015",
-            "doubao-1.5-pro-32k-250115",
-            "doubao-pro-32k",
+            "doubao-seed-2.1-pro",
+            "doubao-seed-2.1-turbo",
+            "doubao-seed-2.0-pro",
+            "doubao-seed-2.0-lite",
+            "doubao-seed-2.0-mini",
         )
     ),
     AiProvider.QWEN.value to ProviderMeta(
@@ -84,11 +83,11 @@ val PROVIDER_META: Map<String, ProviderMeta> = mapOf(
         baseUrl = "https://dashscope.aliyuncs.com/compatible-mode/v1",
         defaultModel = "qwen-plus",
         models = listOf(
+            "qwen3.8-max",
+            "qwen3.7-plus",
+            "qwen3.7-flash",
             "qwen-plus",
             "qwen-flash",
-            "qwen-turbo",
-            "qwen3-max",
-            "qwen-long",
         )
     ),
     AiProvider.GEMINI.value to ProviderMeta(
@@ -97,11 +96,12 @@ val PROVIDER_META: Map<String, ProviderMeta> = mapOf(
         emoji = "♊",
         protocol = ApiProtocol.GEMINI,
         baseUrl = "https://generativelanguage.googleapis.com/v1beta",
-        defaultModel = "gemini-2.5-flash",
+        defaultModel = "gemini-3.7-flash",
         models = listOf(
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            "gemini-2.0-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-flash-latest",
+            "gemini-pro-latest",
         )
     ),
     AiProvider.OPENAI.value to ProviderMeta(
@@ -110,12 +110,14 @@ val PROVIDER_META: Map<String, ProviderMeta> = mapOf(
         emoji = "🎲",
         protocol = ApiProtocol.OPENAI,
         baseUrl = "https://api.openai.com/v1",
-        defaultModel = "gpt-4.1-mini",
+        defaultModel = "gpt-5.6-luna",
         models = listOf(
-            "gpt-4.1",
-            "gpt-4.1-mini",
-            "o3",
-            "o3-mini",
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-mini",
         )
     ),
     AiProvider.CLAUDE.value to ProviderMeta(
@@ -137,12 +139,16 @@ val PROVIDER_META: Map<String, ProviderMeta> = mapOf(
         emoji = "📘",
         protocol = ApiProtocol.OPENAI,
         baseUrl = "https://open.bigmodel.cn/api/paas/v4",
-        defaultModel = "glm-4.6",
+        defaultModel = "glm-5.3",
         models = listOf(
+            "glm-5.3",
+            "glm-5.2",
+            "glm-5.1",
             "glm-5",
+            "glm-5-turbo",
             "glm-4.7",
             "glm-4.6",
-            "glm-4.5",
+            "glm-4.5-air",
         )
     ),
     AiProvider.ZHIPU_CODING.value to ProviderMeta(
@@ -151,12 +157,15 @@ val PROVIDER_META: Map<String, ProviderMeta> = mapOf(
         emoji = "📘",
         protocol = ApiProtocol.OPENAI,
         baseUrl = "https://open.bigmodel.cn/api/coding/paas/v4",
-        defaultModel = "glm-4.7",
+        defaultModel = "glm-5.3",
         models = listOf(
+            "glm-5.3",
+            "glm-5.2",
+            "glm-5.1",
             "glm-5",
+            "glm-5-turbo",
             "glm-4.7",
             "glm-4.6",
-            "glm-4.5",
         )
     ),
     AiProvider.MOONSHOT.value to ProviderMeta(
@@ -165,11 +174,12 @@ val PROVIDER_META: Map<String, ProviderMeta> = mapOf(
         emoji = "🌙",
         protocol = ApiProtocol.OPENAI,
         baseUrl = "https://api.moonshot.cn/v1",
-        defaultModel = "kimi-k2-0905-preview",
+        defaultModel = "kimi-k3",
         models = listOf(
-            "kimi-k2-0905-preview",
-            "kimi-k2-turbo-preview",
-            "kimi-latest",
+            "kimi-k3",
+            "kimi-k2.7-code",
+            "kimi-k2.7-code-highspeed",
+            "kimi-k2.6",
         )
     ),
 )

@@ -459,7 +459,7 @@ struct ProviderEditView: View {
 
             if addModelField {
                 HStack(spacing: 8) {
-                    TextField("输入模型 ID，如 gpt-4o", text: $newModel)
+                    TextField("输入模型 ID，如 deepseek-v4-flash", text: $newModel)
                         .font(.system(size: 13))
                         .foregroundStyle(Theme.textPrimary)
                         .autocorrectionDisabled()

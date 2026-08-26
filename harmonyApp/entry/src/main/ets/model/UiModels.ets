@@ -109,7 +109,7 @@ export class SessionUi {
   id: string = '';
   title: string = '新会话';
   provider: string = 'deepseek';
-  model: string = 'deepseek-chat';
+  model: string = 'deepseek-v4-flash';
   createdAt: number = 0;
   updatedAt: number = 0;
   messageCount: number = 0;

@@ -90,7 +90,7 @@ data class KernelConnectionState(
     val port: Int = 3080,
     val useTls: Boolean = false,
     val provider: String = "deepseek",
-    val model: String = "deepseek-chat",
+    val model: String = "deepseek-v4-flash",
     val status: ConnectionStatus = ConnectionStatus.Disconnected,
     val serverName: String? = null,
     val serverVersion: String? = null,
@@ -108,7 +108,7 @@ data class WorkspaceUi(
 @Serializable
 data class SettingsUi(
     val provider: String = "deepseek",
-    val model: String = "deepseek-chat",
+    val model: String = "deepseek-v4-flash",
     val maxTokens: Int = 8192,
     val autoApprove: Boolean = false,
     val theme: String = "system",

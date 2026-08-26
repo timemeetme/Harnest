@@ -457,7 +457,7 @@ private fun EditorPage(
             FieldBox(
                 value = models,
                 onValue = onModels,
-                hint = "例如\ndeepseek-chat\ndeepseek-reasoner",
+                hint = "例如\ndeepseek-v4-flash\ndeepseek-v4-pro",
                 minLines = 4,
                 maxLines = 8,
             )

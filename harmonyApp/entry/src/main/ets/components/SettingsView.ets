@@ -294,7 +294,7 @@ export struct SettingsView {
 
         Column({ space: 6 }) {
           Text('模型列表（每行一个 ID）').fontSize('12fp').fontColor(this.theme.textSecondary)
-          TextArea({ text: this.editModels, placeholder: 'deepseek-chat\ndeepseek-reasoner' })
+          TextArea({ text: this.editModels, placeholder: 'deepseek-v4-flash\ndeepseek-v4-pro' })
             .fontSize('13fp').fontColor(this.theme.textPrimary)
             .placeholderColor(this.theme.textHint)
             .backgroundColor(this.theme.surface)

@@ -453,7 +453,7 @@ private fun KernelConnectionSection(
     val llm = viewModel.loadLlmConfig()
     val active = llm.configs[llm.activeProvider.value]
     val defaultProvider = active?.provider?.value ?: "deepseek"
-    val defaultModel = active?.model ?: "deepseek-chat"
+    val defaultModel = active?.model ?: "deepseek-v4-flash"
 
     var host by remember(conn.host) { mutableStateOf(conn.host) }
     var portText by remember(conn.port) { mutableStateOf(conn.port.toString()) }

@@ -60,14 +60,14 @@ export interface ProviderMeta {
   keyUrl: string;
 }
 
-/** OpenAI 兼容服务商预设（模型列表 2025-2026） */
+/** OpenAI 兼容服务商预设（模型列表 2026-08 与官方文档核对） */
 export const PROVIDER_META: Record<string, ProviderMeta> = {
   [AiProvider.DEEPSEEK]: {
     provider: AiProvider.DEEPSEEK,
     label: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com',
-    defaultModel: 'deepseek-chat',
-    models: ['deepseek-chat', 'deepseek-reasoner'],
+    defaultModel: 'deepseek-v4-flash',
+    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
     keyUrl: 'https://platform.deepseek.com/api_keys'
   },
   [AiProvider.QWEN]: {
@@ -75,17 +75,17 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
     label: '千问 Qwen',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
     defaultModel: 'qwen-plus',
-    models: ['qwen3-max', 'qwen-plus', 'qwen-flash', 'qwen-turbo', 'qwen3-coder-plus', 'qwq-plus'],
+    models: ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.7-flash', 'qwen-plus', 'qwen-flash'],
     keyUrl: 'https://bailian.console.aliyun.com/'
   },
   [AiProvider.DOUBAO]: {
     provider: AiProvider.DOUBAO,
     label: '豆包 Doubao',
     baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    defaultModel: 'doubao-seed-1.6-251015',
+    defaultModel: 'doubao-seed-2.1-pro',
     models: [
-      'doubao-seed-1.6-251015', 'doubao-seed-1.6-lite-251015', 'doubao-seed-1-6-250615',
-      'doubao-1.5-pro-32k-250115', 'doubao-1.5-thinking-pro-250415'
+      'doubao-seed-2.1-pro', 'doubao-seed-2.1-turbo', 'doubao-seed-2.0-pro',
+      'doubao-seed-2.0-lite', 'doubao-seed-2.0-mini'
     ],
     keyUrl: 'https://console.volcengine.com/ark'
   },
@@ -93,32 +93,32 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
     provider: AiProvider.ZHIPU,
     label: '智谱 按量付费',
     baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
-    defaultModel: 'glm-4.6',
-    models: ['glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-air'],
+    defaultModel: 'glm-5.3',
+    models: ['glm-5.3', 'glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.6', 'glm-4.5-air'],
     keyUrl: 'https://open.bigmodel.cn/'
   },
   [AiProvider.ZHIPU_CODING]: {
     provider: AiProvider.ZHIPU_CODING,
     label: '智谱 Coding Plan',
     baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4',
-    defaultModel: 'glm-4.7',
-    models: ['glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.6', 'glm-4.5'],
+    defaultModel: 'glm-5.3',
+    models: ['glm-5.3', 'glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.6'],
     keyUrl: 'https://open.bigmodel.cn/'
   },
   [AiProvider.MOONSHOT]: {
     provider: AiProvider.MOONSHOT,
     label: 'Kimi 月之暗面',
     baseUrl: 'https://api.moonshot.cn/v1',
-    defaultModel: 'kimi-k2-0905-preview',
-    models: ['kimi-k2-0905-preview', 'kimi-k2-turbo-preview', 'kimi-latest'],
-    keyUrl: 'https://platform.moonshot.cn/'
+    defaultModel: 'kimi-k3',
+    models: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6'],
+    keyUrl: 'https://platform.kimi.com/'
   },
   [AiProvider.OPENAI]: {
     provider: AiProvider.OPENAI,
     label: 'OpenAI',
     baseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-4.1-mini',
-    models: ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'o3-mini', 'o4-mini'],
+    defaultModel: 'gpt-5.6-luna',
+    models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'],
     keyUrl: 'https://platform.openai.com/api-keys'
   },
   [AiProvider.GEMINI]: {
