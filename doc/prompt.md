@@ -2,7 +2,7 @@
 
 > 本文档汇总 Harnest 项目全部开发会话的用户 prompt（按批次还原），以及项目最新进展。
 >
-> **数据源说明**：TRAE 的完整对话记录存储在 `AppData/Roaming/TRAE SOLO CN/ModularData/ai-agent/database.db`（872MB，整库加密，非标准 SQLite，无 v10 前缀），无法在应用外离线解密提取逐字 prompt。本文档以 **git 提交历史（63 笔）+ 项目记忆（`.trae/rules/project_rules.md` 维护日志 24 条）** 为权威源，按会话批次还原所有 prompt 意图。
+> **数据源说明**：TRAE 的完整对话记录存储在 `AppData/Roaming/TRAE SOLO CN/ModularData/ai-agent/database.db`（872MB，整库加密，非标准 SQLite，无 v10 前缀），无法在应用外离线解密提取逐字 prompt。本文档历史部分以 **git 提交历史（63 笔）+ 项目记忆（`.trae/rules/project_rules.md` 维护日志）** 为权威源按批次还原；**自批次 18 起改为逐字记录**（维护协议第 6 条：每会话结束前把用户输入逐条原文追加到本文档）。
 >
 > 生成时间：2026-08-26（Asia/Taipei），仓库 HEAD：`f6e2cc3536`
 
@@ -180,11 +180,17 @@
 | 1 | 「继续」/「Continue」×N（驱动 q1-q9 全链路：prelude.js 编写 → 测试门禁 → 内核 entry → 三端接线 → 本地门禁 → 提交） | `c6ceeca620` feat(kernel)、`4afd7ad992` feat(all)、`68588cd043` feat(ios)、`c15f7c2c7b` feat(android)、`e07ab8ec2b` feat(harmony) |
 | 2 | 「把历史上我输入的所有promt汇总到一个文档，并且把当前项目进展汇总附在文后，输出到doc/prompt.md」 | `06eb5c0982` docs: prompt history summary |
 | 3 | （中断期并行会话）鸿蒙调用链断点补齐 + iOS Result 泛型修复 | `8bec92e86d` docs(memory)、`c9f453c744` fix(ios) |
-| 4 | 本文档重写（用户反馈文档不完整） | 本次 |
 
 **OOXML 内容**：`tools/sandbox-prelude/prelude.js` 482 行纯 JS（base64/UTF-8/CRC32/zipPack STORE/zipUnpack+inflate/makeXlsx/makeDocx/makePptx/readXlsx/readDocxText/readBytes/writeBytes）；三端 `__sbReadB64/__sbWriteB64` 桥；pick 落点统一沙箱根 picked/；内核 entry 描述 + files schema。
 
 **验证**：node 往返 + PowerShell Expand-Archive/[xml] 良构/Compress-Archive deflate 回读 + 1MB inflate 17ms + Android/鸿蒙本地门禁 + CI 三端全绿（iOS 首轮 Result<Void,String> 失败后修复复跑）。
+
+### 18. prompt.md 补全批次（2026-08-26 下午，W）
+
+| # | Prompt（逐字原文） | 产出提交 |
+|---|-------------------|----------|
+| 1 | 「"D:\Projects\HarnessApp\doc\prompt.md" 文件不完整，我可以在trae的应用里看到所有对话记录，但是这个文档里太少了，只有最近几次对话的promt」 | `57bff75aa4` docs: rewrite prompt history |
+| 2 | 「好的，以后每个会话结束都默认把输入逐条追加到文档里」 | 本次（协议第 6 条入库 + 本批次记录） |
 
 ---
 

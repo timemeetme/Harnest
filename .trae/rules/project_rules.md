@@ -3,7 +3,7 @@
 > 本文件是 TRAE 项目记忆：每次会话自动加载，新会话开工前先读这里，避免重复踩坑。
 > 由 TRAE 生成并按项目进展自动维护：每次会话发生实质变更（新提交/新结论/新陷阱）时由当前会话直接更新。人工修改请同步更新「维护日志」。
 >
-> 最后同步 HEAD: c9f453c744 （2026-08-26，Windows 机：OOXML 沙箱扩展批次全链路闭环——三端 CI 全绿，iOS 首轮 CI 暴露 Result<Void, String> 编译错由 c9f453c744 修复（陷阱 27））
+> 最后同步 HEAD: f6e2cc3536 （2026-08-26，Windows 机：OOXML 批次 CI 收尾三端全绿 + doc/prompt.md 全量重写（57bff75aa4）+ 维护协议新增第 6 条「逐条记录用户输入到 doc/prompt.md」）
 
 ## 项目身份
 
@@ -214,6 +214,7 @@ Mac 端后续（2026-08-23）：c5d5d82e71（ConfigService 缓存回写值语义
 3. **自动同步 GitHub**（用户指令 2026-08-23，双机同遵）：会话内产生阶段性进展（新提交落地/新结论/新陷阱）后，**本会话结束前必须**把记忆更新以独立提交推送到 origin/main（`docs(memory): ...`），保证双机记忆一致——不要只改文件不推送
 4. 「已知陷阱」只追加或修订，**不删除**条目
 5. 记录命令时必须是**本机验证过**的形式（注明 macOS/Windows 机）；未验证的标 ⬜
+6. **逐条记录用户输入**（用户指令 2026-08-26）：每个会话结束前，把该会话内用户的输入（含追问/纠错/「继续」类指令）**逐条原文**追加到 `doc/prompt.md`（按会话批次分组，`git add -f` 提交，`docs:` scope）。TRAE 对话数据库（database.db）整库加密无法离线提取，本文档是 prompt 逐字留存的唯一渠道——别只记意图摘要
 
 > 本协议对 **Mac 机与 Windows 机的 TRAE 会话同等生效**（记忆文件随仓库共享，pull 后自动加载）。
 
@@ -240,3 +241,4 @@ Mac 端后续（2026-08-23）：c5d5d82e71（ConfigService 缓存回写值语义
 - 2026-08-25 Windows 端 Tier B 收尾（364bc5b96b→87b4a506d4，**由上条日志主会话继续**）：**iOS 批次子代理首跑完全丢失**（返回 result missing，git status 验证 iosApp 零产出——"成功报告"≠落盘，子代理层陷阱 13 变体，产出必须 git status/diff 核实）→ 重发加严约束（只改 iosApp/、禁 git、@unchecked Sendable/JSC 微任务泵坑位前置说明）成功：ScriptSandbox.swift 379 行（"script-sandbox" 串行队列与引擎 jsQueue 隔离防交叉死锁 + evaluateScript("0") 驱动 JSC 微任务 + 超时后队列异步置 nil 释放 context）。主线程五文件 diff 复核通过——含陷阱 15 词法确认：runSync 是**同步函数**，其内 NSLock.lock() 不构成 asynchronous context，即使被 async execute 调用也不触发 noasync 告警；callFunc 传 nil 对齐 listProviders 惯例。**鸿蒙子代理越权 git 提交**（b08b09c571 记忆沉淀，内容经复核准确但彼时 iOS 批次丢失故缺 iOS 记录）——子代理任务描述必须显式禁 git 操作。本地门禁复验：Android UP-TO-DATE + 鸿蒙 2s586ms；.gitignore 补 harmonyApp/package-lock.json（git status 曾显示 untracked 险些可被 add -A 带上，陷阱 19 堵漏）；四批提交 feat(kernel)+feat(ios)+feat(android)+feat(harmony)（27 文件 +2705）推送 origin/main，iOS 编译验证靠 CI
 - 2026-08-26 Windows 端 OOXML 批次收尾（会话接续，基线 8bec92e86d）：上会话中断遗留断点——鸿蒙 C++ 层 run() 已改 4 参签名（source, prelude, timeoutMs, outJson）但调用链四处缺口（NativeScriptEngineRun 旧 3 参调用必编译错 + index.d.ts 无 preludeSource + HarnessNative.ets 未透传 + AppViewModel 未加载 rawfile prelude.js），本会话串行补齐（AppViewModel 新增 loadPrelude：getRawFileContent + TextDecoder App 级缓存，失败降级空串不阻塞普通脚本；envelope files 字段经 JSON.parse 自动透传无需额外接线）。门禁：鸿蒙首跑败于 CompileResource 清不掉旧 build 目录（11204003 文件锁）→ 清 entry/build 后 BUILD SUCCESSFUL 20s675ms（CompileArkTS 14s + C++ 交叉编译全过，新 decodeWithStream 弃用 WARN 与 loadHarnessJs 既有风格一致）；Android compileDebugKotlin UP-TO-DATE。推送遇 github.com:443 不通 → 系统代理未继承（陷阱 25）；挂代理后被拒——中断期另一并行会话已自主推送 feat 提交（陷阱 26），同期 Mac 叠加 53315ce2e0（resolvePath 修复）+ 369725b236；pull --rebase 仅记忆文件头行冲突（合并双方条目），Mac 修复自动合流（cleanPath 与 b64 桥不重叠），推送 369725b236..8bec92e86d 成功并触发 CI 三端（结果待补）；核查并行会话记忆失实并追加修订（见上条【修订】）。另：.qoder/ 加入 .git/info/exclude 防入库
 - 2026-08-26 Windows 端 OOXML 批次 CI 收尾（c9f453c744）：确认 8bec92e86d 触发的 Build HarmonyOS 2m35s ✅ / Build Android 3m32s ✅；iOS 首轮失败（`Result<Void, String>` 编译错，陷阱 27 收录，53315ce2e0 后由 c9f453c744 改返回 `String?` 修复）→ iOS 复跑 ✅，OOXML 批次三端 CI 全绿闭环；记忆 HEAD 更新到 c9f453c744
+- 2026-08-26 Windows 端 prompt.md 补全批次（57bff75aa4 + 本会话收尾）：用户反馈 doc/prompt.md 只覆盖最近几次会话 → 探明 TRAE 对话库 `AppData/Roaming/TRAE SOLO CN/ModularData/ai-agent/database.db`（872MB）为**整库加密**（非 SQLite 头、无 v10/v101 前缀、os_crypt DPAPI 密钥），离线不可提取逐字 prompt，放弃数据库路线；改以 git 63 笔提交 + 记忆维护日志为权威源重写文档（17 批次），提交 `57bff75aa4` 挂代理推送。随后用户指令「以后每个会话结束都默认把输入逐条追加到文档里」→ 维护协议新增**第 6 条**（逐字记录用户输入到 doc/prompt.md，本文档是逐字留存唯一渠道），批次 18 起执行逐字记录
