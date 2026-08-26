@@ -212,6 +212,14 @@
 |---|-------------------|----------|
 | 1 | 「现在设置页面，国内外主流模型的设置是否与各家官方文档、最新模型ID匹配不上了？请检查后修复，我之前测试kimi-k3失败。」 | `2393579bf3` fix(all)：八家 provider 预设刷新至官方现役模型 ID（四份目录 + 三处 placeholder + 五处 fallback）+ 本次 docs 收尾 |
 
+### 21. 内核能力补齐阶段 1 批次（2026-08-26 夜，W，Qoder 会话）
+
+| # | Prompt（逐字原文） | 产出提交 |
+|---|-------------------|----------|
+| 1 | 「深入分析 deepseek-harness还有哪些能力，在目前harnest项目中还缺失，给出下一步详细的架构设计、功能补齐方案。」 | 实施计划《内核能力补齐路线图》获批准（三阶段：fs/web_fetch/subagent → web_search/附件/持久化 → skills/MCP），无代码提交 |
+| 2 | 「Implement the plan as specified, it is attached for your reference. Do NOT edit the plan file itself.」 | `95209237fb` feat(kernel)：阶段 1 落地（entry 装配 fs 工具三件套/web_fetch/subagent + shim 扩展 + 三端宿主 rename/realpath op + 三端 bundle 重分发）+ 本次 docs 收尾 |
+| 3 | 「继续」（会话恢复 ×2） | 同上，断点续实施 |
+
 ---
 
 ## 二、当前项目进展汇总
@@ -219,8 +227,8 @@
 ### 2.1 仓库状态
 
 - **仓库**：`git@github.com:timemeetme/Harnest.git`，主分支 `main`
-- **当前 HEAD**：`2393579bf3`（2026-08-26，模型 ID 预设刷新批次；docs 收尾为本次提交）
-- **CI 状态**：三端全绿（HarmonyOS 2m54s / Android 3m39s / iOS 10m43s，2393579bf3 触发）
+- **当前 HEAD**：`95209237fb`（2026-08-26，内核能力补齐阶段 1；docs 收尾为本次提交）
+- **CI 状态**：三端全绿（HarmonyOS 3m45s / Android 3m35s / iOS 6m26s，95209237fb 触发；iOS FsBridge.swift 首次真实编译通过）
 - **双机开发**：Mac（SSH heavencme 协作者）+ Windows（https + gh CLI，需手动挂系统代理 127.0.0.1:7890）
 
 ### 2.2 架构总览
@@ -244,7 +252,7 @@ tools/harness-transpiler (TS 转译器，pnpm)
 - `harmonyApp/` — ArkTS + C++ QuickJS（`ScriptEngine.cpp`），hvigor 构建
 - `shared/` — KMP 共享模块，iOS 产物为 XCFramework（CI 对齐产物）
 
-### 2.3 里程碑一览（81 笔提交，含本次 docs 收尾）
+### 2.3 里程碑一览（83 笔提交，含本次 docs 收尾）
 
 | 日期 | 里程碑 | 关键提交 |
 |------|--------|----------|
@@ -264,6 +272,7 @@ tools/harness-transpiler (TS 转译器，pnpm)
 | 08-26 | OOXML 沙箱扩展（prelude.js + 三端 b64 桥 + CI 全绿） | `c6ceeca620` 等 7 笔 |
 | 08-26 | 沙箱定时器三端 + bg_timer 修复 + TextEncoder/TextDecoder | `0e45337533`…`4179395317` |
 | 08-26 | 八家 provider 预设刷新至官方现役模型 ID（kimi-k3/deepseek-v4/glm-5.3/gpt-5.6 等） | `2393579bf3` |
+| 08-26 | 内核能力补齐阶段 1：fs 工具三件套 + web_fetch + subagent 进 mobile bundle | `95209237fb` |
 
 ### 2.4 三端功能矩阵（当前状态）
 
@@ -278,6 +287,9 @@ tools/harness-transpiler (TS 转译器，pnpm)
 | 沙箱定时器（setTimeout/setInterval/clearTimeout）+ TextEncoder/TextDecoder | ✅ | ✅ | ✅ |
 | bg_timer 宿主驱动自完成（bgTimer device op） | ✅ | ✅ | ✅ |
 | OOXML（Prelude.makeXlsx/makeDocx/makePptx + readBytes/writeBytes） | ✅ | ✅ | ✅ |
+| 内核 fs 工具（read/write/edit/search，经 __harnessFsCall 沙箱） | ✅ | ✅ | ✅ |
+| web_fetch（网页抓取转 markdown） | ✅ | ✅ | ✅ |
+| subagent 进程内子代理（LocalJobRegistry 后台任务） | ✅ | ✅ | ✅ |
 | token 水位条（getUsageStats） | ✅ | ✅ | ✅ |
 | /plan 斜杠拦截 | ✅ | ✅ | ✅ |
 | 长按编辑重发 / 会话导出 Markdown | ✅ | ✅ | ✅ |
@@ -363,6 +375,9 @@ xcodebuild test  -project Harnest.xcodeproj -scheme Harnest -destination 'platfo
 - **真机·沙箱定时器**（让模型跑 `run_script`：`const t0=Date.now(); await new Promise(r=>setTimeout(r,500)); return Date.now()-t0` 应返回 ≥500 且 <2000；clearTimeout 用例不触发）
 - **真机·bg_timer**（让模型「启动一个 15 秒后台计时器」：后台任务卡应 15s 后从 running → completed——修复前永久 running）
 - **真机·kimi-k3 打通**（新预设选 Kimi/kimi-k3 发一轮对话应正常回复——修复前预设三个 k2 模型均已官方下线；其余七家新默认模型各抽验一轮；存量会话若保存了 deepseek-chat 等已停用 ID 需手动改选）
+- **真机·内核 fs 工具**（让模型「在工作目录建 out/a.md 写入两行中文，读回并把第二行改成 XX」：工具卡应依次出现 write/read/edit 且全部成功——新增 read/write/edit/glob/grep 工具首次真机验证）
+- **真机·web_fetch**（让模型「抓取 https://example.com 并总结」：web_fetch 工具卡应返回 markdown 正文）
+- **真机·subagent**（让模型「派一个子代理去抓取 example.com 并总结」：后台任务面板应出现子代理任务并完成；单线程 QuickJS 上主循环与子代理事件泵交错需重点观察）
 
 ---
 
