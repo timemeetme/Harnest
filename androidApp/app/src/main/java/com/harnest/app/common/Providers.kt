@@ -107,14 +107,15 @@ object Providers {
 }
 
 /**
- * 思考模式（reasoning effort）— 与内核 llm-deepseek 适配器的合法档位对齐（off/high/max）。
+ * 思考模式（reasoning effort）— 与内核 llm-deepseek 适配器的合法档位对齐（off/low/high/max）。
  * null = 不发送 reasoningEffort，走 provider 服务端默认。
  */
 object ReasoningEfforts {
-    val IDS = listOf("off", "high", "max")
+    val IDS = listOf("off", "low", "high", "max")
 
     fun label(id: String?): String = when (id) {
         "off" -> "关闭思考"
+        "low" -> "轻思考"
         "high" -> "思考"
         "max" -> "深度思考"
         else -> "默认"

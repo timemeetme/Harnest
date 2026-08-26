@@ -24,13 +24,14 @@ export interface EffortOption {
 export const EFFORT_OPTIONS: EffortOption[] = [
   { value: null, label: '默认', hint: '跟随服务端默认' },
   { value: 'off', label: '关闭思考', hint: '不产出思考，速度最快' },
+  { value: 'low', label: '轻思考', hint: '轻度思考，响应更快' },
   { value: 'high', label: '思考', hint: '常规思考' },
   { value: 'max', label: '深度思考', hint: '深度思考，耗时更长' }
 ];
 
 /** k1：reasoningEffort 合法值校验（持久化前过滤脏数据） */
 export class ReasoningEfforts {
-  static readonly ALL: string[] = ['off', 'high', 'max'];
+  static readonly ALL: string[] = ['off', 'low', 'high', 'max'];
 
   static isValid(v: string | null | undefined): boolean {
     return v !== null && v !== undefined && v.length > 0 && ReasoningEfforts.ALL.indexOf(v) >= 0;

@@ -1311,6 +1311,7 @@ private fun ModelPicker(
             listOf(
                 null to "跟随服务端默认",
                 "off" to "不产出思考，速度最快",
+                "low" to "轻度思考，响应更快",
                 "high" to "常规思考",
                 "max" to "深度思考，耗时更长",
             ).forEach { (effortId, desc) ->

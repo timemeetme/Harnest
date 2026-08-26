@@ -107,11 +107,12 @@ enum Providers {
 
 /// 思考模式档位 — 镜像 Android common/Providers.kt ReasoningEfforts。
 enum ReasoningEfforts {
-    static let ids: [String] = ["off", "high", "max"]
+    static let ids: [String] = ["off", "low", "high", "max"]
 
     static func label(_ id: String?) -> String {
         switch id {
         case "off": return "关闭思考"
+        case "low": return "轻思考"
         case "high": return "思考"
         case "max": return "深度思考"
         default: return "默认"

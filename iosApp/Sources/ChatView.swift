@@ -2061,6 +2061,7 @@ struct ModelPickerView: View {
     private func effortCaption(_ e: String) -> String {
         switch e {
         case "off": return "不产出思考，速度最快"
+        case "low": return "轻度思考，响应更快"
         case "high": return "常规思考"
         case "max": return "深度思考，耗时更长"
         default: return ""
