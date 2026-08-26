@@ -239,6 +239,20 @@
 |---|-------------------|----------|
 | 1 | 「上游 reasoningEffort 新增 low 档，3端同步增加。」 | `5bc58700e8` feat(all)：三端思考模式面板新增 low 档（label「轻思考」/hint「轻度思考，响应更快」，顺序 off<low<high<max）；内核 dsh-v0.1.1-rc.2 已原生支持无需重打 bundle；Android compileDebugKotlin + 鸿蒙 assembleHap 本地门禁过，iOS 靠 CI |
 
+### 25. Kimi 401 + 回底按钮 + Providers 预设批次（2026-08-26，M）
+
+| # | Prompt（逐字原文） | 产出提交 |
+|---|-------------------|----------|
+| 1 | 「ios上配置kimi的api时发现问题……Invalid Authentication。对话底部总是在页面到底部时弹出"回到底部"……逻辑反了；且应该在页面很长、已经向上滑动超过3屏之后，再出这个提示。判断另外2个端是否有类似问题，一并修复。」 | 三端 ChatView 回底按钮阈值修复（400pt/3 屏语义）+ Kimi 401 排查定为用户侧 Key 问题；并入批次 26 提交 |
+| 2 | 「请对照各家模型api的官方文档，确认当前信息是否有过时的，应该包含最新的模型，需要增加对chatgpt、claude、阿里千问、deepseek的api的支持」 | 三端 Providers 预设刷新（deepseek v4 系/qwen3.7 系/openai gpt-5.x/claude provider）；并入批次 26 提交 |
+| 3 | 「暂停构建，目前在ios端实测，kimi模型的api仍然报错」 | 排查结论：用户侧 Key 问题（非代码）；无提交 |
+
+### 26. 远端合流 + stream failed 错误详情透出批次（2026-08-26，M）
+
+| # | Prompt（逐字原文） | 产出提交 |
+|---|-------------------|----------|
+| 1 | 「更新远端代码；定位问题：现在模型验证都是提示 DeepSeek API stream from ...failed, 看不到详细报错原因。」 | `74cc1c4452` fix(all)：①stash→pull--ff-only→stash pop 合流远端 31 提交（内核 dsh-v0.1.1-rc.2/kimi-k3 迁移/low 档/沙箱定时器/fs tools/web_fetch/subagent），三端 Providers 冲突采用本地版本，鸿蒙补回 LEGACY_PRESET_MODELS；②根因：agent.ts turn 收口 LlmError 分支取 frozen failure（无 cause）吞掉底层 401/HTTP 详情（陷阱 28）；③修复：内核 LlmFailure 加可选 `detail` 字段携带 errorChain，三端宿主 msg+detail 展示；④transpiler 重建三端 harness.js 同 SHA256（618069fb）；门禁 iOS build+XCTest 14/14、Android compileDebugKotlin |
+
 ---
 
 ## 二、当前项目进展汇总
@@ -352,7 +366,7 @@ xcodebuild build -project Harnest.xcodeproj -scheme Harnest -destination 'platfo
 xcodebuild test  -project Harnest.xcodeproj -scheme Harnest -destination 'platform=iOS Simulator,name=iPhone 17e'
 ```
 
-### 2.6 已知陷阱（27 条摘要，详见 `.trae/rules/project_rules.md`）
+### 2.6 已知陷阱（28 条摘要，详见 `.trae/rules/project_rules.md`）
 
 1. gradlew 无执行位 → macOS 用 `sh ./gradlew`
 2. `:shared:allTests` 在 Mac 必失败（无 Android SDK）→ 用 `iosSimulatorArm64Test`
@@ -381,6 +395,7 @@ xcodebuild test  -project Harnest.xcodeproj -scheme Harnest -destination 'platfo
 25. Windows 机 git/gh 访问 GitHub 需手动挂系统代理（127.0.0.1:7890）
 26. 并行会话会在同一仓库自主提交推送 → push 前必先 fetch 双向核对
 27. Swift `Result<Success, Failure>` 的 Failure 必须遵 `Error` 协议 → 别用 Result<Void, String>
+28. LlmError 的 `failure` 不携带 `cause` 链 → turn 收口合并 errorChain 为 `detail` 字段透出底层详情
 
 ### 2.7 待验证项
 
@@ -397,6 +412,7 @@ xcodebuild test  -project Harnest.xcodeproj -scheme Harnest -destination 'platfo
 - **真机·内核 fs 工具**（让模型「在工作目录建 out/a.md 写入两行中文，读回并把第二行改成 XX」：工具卡应依次出现 write/read/edit 且全部成功——新增 read/write/edit/glob/grep 工具首次真机验证）
 - **真机·web_fetch**（让模型「抓取 https://example.com 并总结」：web_fetch 工具卡应返回 markdown 正文）
 - **真机·subagent**（让模型「派一个子代理去抓取 example.com 并总结」：后台任务面板应出现子代理任务并完成；单线程 QuickJS 上主循环与子代理事件泵交错需重点观察）
+- **真机·错误详情透出**（模型验证失败时，错误消息应在「DeepSeek API stream from ... failed」之后换行附底层详情，如 401 invalid_authentication_error——陷阱 28 修复后的回归验证）
 
 ---
 
