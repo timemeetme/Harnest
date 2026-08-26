@@ -227,6 +227,12 @@
 | 1 | 「现在在harmony手机里，设置页面，添加模型api时，kimi推荐的模型ID仍然没有看到kimi-k3」 | `dd549acc7e` fix(all)：三端 api_config 预设迁移 2026-08b（旧预设整表替换 + 定制列表补齐现役预设），鸿蒙重新构建装机验证（hilog 迁移日志 + 设备 api_config.json 实读确认 kimi-k3 可选），CI 三端全绿 |
 | 2 | 「后续所有修改都要在三端同时一致，同时合入」 | 新纪律写入 `.trae/rules/project_rules.md`（三端一致纪律条目 + HEAD 行同步）与长期记忆，随本次 docs 提交 |
 
+### 23. 内核升级批次（2026-08-26，W，Qoder 会话）
+
+| # | Prompt（逐字原文） | 产出提交 |
+|---|-------------------|----------|
+| 1 | 「最近dsh有没有更新内容，判断兼容性、新功能，请评估后从上游pull过来，更新内核」 | `43961d5` feat(kernel)：子模块升到 dsh-v0.1.1-rc.2（上游 854 笔新提交；新内容：Files API 图片管线/read_image 降采样/web search 增强；Gemini 兼容热修在新基线重放并归档 patch；shims 补 os.homedir + 纯 JS sha256 createHash；白名单加 FormData/Blob 上传专用路径）+ `bccd3ce336` feat(all)：三端 harness.js 重打包 SHA256 一致，门禁：build/quickjs-compat PASS + Node 冒烟 11/11 + Android 编译 + 鸿蒙 assembleHap，CI 三端验证中 |
+
 ---
 
 ## 二、当前项目进展汇总
