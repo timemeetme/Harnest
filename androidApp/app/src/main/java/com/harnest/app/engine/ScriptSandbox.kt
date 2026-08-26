@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.SystemClock
+import android.util.Base64
 import android.util.Log
 import com.whl.quickjs.wrapper.JSCallFunction
 import com.whl.quickjs.wrapper.QuickJSContext
@@ -28,7 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * - runSync：Promise 包裹用户代码，CountDownLatch 等待 settle 或超时（默认上限 120s）
  * 桥函数遵循 FsBridge 约定：不抛 Java 异常 — read/write 错误以 \u0000 前缀哨兵串带回 JS 侧转 throw。
  */
-class ScriptSandbox private constructor(context: Context) {
+class ScriptSandbox private constructor(private val context: Context) {
 
     companion object {
         private const val TAG = "ScriptSandbox"
@@ -50,6 +51,9 @@ class ScriptSandbox private constructor(context: Context) {
 
     val sandboxRoot: File = File(context.filesDir, "scripts").apply { mkdirs() }
 
+    /** 脚本沙箱根目录别名（DeviceBridge pick 落点用）。 */
+    val scriptsRoot: File get() = sandboxRoot
+
     private val fetchClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(55, TimeUnit.SECONDS)
@@ -61,6 +65,9 @@ class ScriptSandbox private constructor(context: Context) {
     private val logLock = Any()
     private val logBuf = StringBuilder()
     private var logTruncated = false
+
+    /** 沙箱脚本本轮写入的文件（相对路径），execute 返回时透传给内核。 */
+    private val writtenFiles: MutableSet<String> = mutableSetOf()
 
     @Volatile
     private var qjs: QuickJSContext? = null
@@ -85,6 +92,7 @@ class ScriptSandbox private constructor(context: Context) {
             logBuf.setLength(0)
             logTruncated = false
         }
+        synchronized(writtenFiles) { writtenFiles.clear() }
         settleResult = null
         settleError = null
         evalError = null
@@ -118,6 +126,7 @@ class ScriptSandbox private constructor(context: Context) {
                 "stdoutTruncated" to stdoutTruncated,
                 "result" to "",
                 "durationMs" to durationMs,
+                "files" to synchronized(writtenFiles) { writtenFiles.toList() },
             )
         }
         val err = evalError ?: settleError
@@ -129,6 +138,7 @@ class ScriptSandbox private constructor(context: Context) {
             "error" to err,
             "timedOut" to false,
             "durationMs" to durationMs,
+            "files" to synchronized(writtenFiles) { writtenFiles.toList() },
         )
     }
 
@@ -155,6 +165,12 @@ class ScriptSandbox private constructor(context: Context) {
         global.setProperty("__sbWrite", JSCallFunction { args ->
             sbWrite(args.getOrNull(0) as? String ?: "", args.getOrNull(1) as? String ?: "")
         })
+        global.setProperty("__sbReadB64", JSCallFunction { args ->
+            sbReadB64(args.getOrNull(0) as? String ?: "")
+        })
+        global.setProperty("__sbWriteB64", JSCallFunction { args ->
+            sbWriteB64(args.getOrNull(0) as? String ?: "", args.getOrNull(1) as? String ?: "")
+        })
         global.setProperty("__sbSettle", JSCallFunction { args ->
             settleResult = args.getOrNull(0)?.toString() ?: "null"
             latch.countDown()
@@ -166,7 +182,18 @@ class ScriptSandbox private constructor(context: Context) {
             null
         })
         ctx.evaluate(RUNTIME_JS)
+        loadPrelude(ctx)
         return ctx
+    }
+
+    /** 加载共享沙箱预置库（assets/prelude.js，OOXML/zip/base64 能力）。失败仅 log 不崩溃。 */
+    private fun loadPrelude(ctx: QuickJSContext) {
+        try {
+            val js = context.assets.open("prelude.js").bufferedReader().readText()
+            ctx.evaluate(js)
+        } catch (e: Throwable) {
+            Log.w(TAG, "prelude.js load failed: ${e.message}")
+        }
     }
 
     /** 用户代码包裹模板：同步体抛错 / Promise reject 都收敛到 __sbSettleErr。 */
@@ -310,9 +337,34 @@ ${code}
         val f = resolveInSandbox(rel)
         f.parentFile?.mkdirs()
         f.writeText(content)
+        synchronized(writtenFiles) { writtenFiles.add(rel) }
         "ok"
     } catch (e: Throwable) {
         "\u0000${e.message ?: e.javaClass.simpleName}"
+    }
+
+    /** prelude 二进制读桥：返回 JSON 字符串 "{ok,dataBase64}" 或 "{ok:false,error}"。 */
+    private fun sbReadB64(rel: String): String = try {
+        val bytes = resolveInSandbox(rel).readBytes()
+        "{\"ok\":true,\"dataBase64\":\"${Base64.encodeToString(bytes, Base64.NO_WRAP)}\"}"
+    } catch (e: Throwable) {
+        "{\"ok\":false,\"error\":\"${e.message ?: e.javaClass.simpleName}\"}"
+    }
+
+    /** prelude 二进制写桥：Base64 解码失败 / 越界 / IO 错误均回 JSON error；成功登记 writtenFiles。 */
+    private fun sbWriteB64(rel: String, base64: String): String = try {
+        val bytes = try {
+            Base64.decode(base64, Base64.NO_WRAP)
+        } catch (e: Throwable) {
+            return "{\"ok\":false,\"error\":\"invalid base64\"}"
+        }
+        val f = resolveInSandbox(rel)
+        f.parentFile?.mkdirs()
+        f.writeBytes(bytes)
+        synchronized(writtenFiles) { writtenFiles.add(rel) }
+        "{\"ok\":true}"
+    } catch (e: Throwable) {
+        "{\"ok\":false,\"error\":\"${e.message ?: e.javaClass.simpleName}\"}"
     }
 
     // ── utils ────────────────────────────────────────────────

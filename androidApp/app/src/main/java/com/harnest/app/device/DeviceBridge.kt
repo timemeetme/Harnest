@@ -171,6 +171,9 @@ class DeviceBridge(
             .put("stdoutTruncated", res["stdoutTruncated"] == true)
             .put("timedOut", res["timedOut"] == true)
             .put("durationMs", res["durationMs"] as? Long ?: 0L)
+        @Suppress("UNCHECKED_CAST")
+        val files = res["files"] as? List<String> ?: emptyList()
+        out.put("files", JSONArray(files))
         val err = res["error"] as? String
         if (!err.isNullOrEmpty()) out.put("error", err)
         return out
@@ -259,10 +262,12 @@ class DeviceBridge(
             val uri = android.net.Uri.parse(uriStr)
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
                 ?: return JSONObject().put("ok", false).put("error", "cannot open $uriStr")
-            val file = File(engine.sandboxRoot, "picked/${System.currentTimeMillis()}_$name")
+            val scriptsRoot = ScriptSandbox.get(context).scriptsRoot
+            val relPath = "picked/${System.currentTimeMillis()}_$name"
+            val file = File(scriptsRoot, relPath)
             file.parentFile?.mkdirs()
             file.writeBytes(bytes)
-            JSONObject().put("ok", true).put("path", file.relativeToOrSelf(engine.sandboxRoot).path)
+            JSONObject().put("ok", true).put("path", relPath)
                 .put("size", bytes.size).put("uri", uriStr)
         } catch (e: Throwable) {
             JSONObject().put("ok", false).put("error", e.message)

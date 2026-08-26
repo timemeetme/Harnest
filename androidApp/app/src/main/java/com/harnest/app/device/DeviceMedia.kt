@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.ContentValues
 import android.content.Context
 import android.provider.MediaStore
+import com.harnest.app.engine.ScriptSandbox
 import com.harnest.app.engine.VisionAttach
 import org.json.JSONObject
 import java.io.File
@@ -80,11 +81,12 @@ object DeviceMedia {
                     out = JSONObject().put("ok", true).put("uri", uri).put("size", bytes.size)
                         .put("base64", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
                 } else {
+                    val scriptsRoot = ScriptSandbox.get(context).scriptsRoot
                     val name = "photo_${System.currentTimeMillis()}.jpg"
-                    val file = File(File(context.filesDir, "harness/photos"), name)
+                    val file = File(scriptsRoot, "picked/$name")
                     file.parentFile?.mkdirs()
                     file.writeBytes(bytes)
-                    out = JSONObject().put("ok", true).put("uri", uri).put("size", bytes.size).put("path", "photos/$name")
+                    out = JSONObject().put("ok", true).put("uri", uri).put("size", bytes.size).put("path", "picked/$name")
                 }
                 out
             } catch (e: Throwable) {
