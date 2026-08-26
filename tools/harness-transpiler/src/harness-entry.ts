@@ -32,6 +32,25 @@ import { BasicCompactionEngine } from '../../compaction/compaction-basic/src/ind
 import LocalJobRegistry from '../../jobs/jobs-local/src/index.ts'
 // 工具层：todo_write（整表快照事件 todo/write — 消息流/详情页渲染数据源）
 import * as ToolTodo from '../../todo/tool-todo/src/index.ts'
+// 工具层：文件三件套 — LocalFileSystem（fs 服务，经 host-bridge fs shim 落 App 沙箱）
+// + read/write/edit 工具（tool-fs）+ str_replace_editor（tool-str-replace-editor）。
+// tool-fs-search（glob/grep）依赖 subprocess/ripgrep，移动端无子进程，不装配。
+import LocalFileSystem from '../../fs/fs-local/src/index.ts'
+import * as ToolFs from '../../fs/tool-fs/src/index.ts'
+import * as ToolStrReplaceEditor from '../../fs/tool-str-replace-editor/src/index.ts'
+// 工具层：web_fetch — WebRuntime（web 服务）+ HTTP 抓取实现（web-fetch-http，走 fetch 桥）+ tool-web（search:false，搜索服务阶段 2 接入）
+import WebRuntime from '../../web/web/src/index.ts'
+import * as WebFetchHttp from '../../web/web-fetch-http/src/index.ts'
+import * as ToolWeb from '../../web/tool-web/src/index.ts'
+// 工具层：subagent — SubagentRuntime（subagents 服务注册表）+ 进程内 spawn provider +
+// subagent 工具（后台任务走 LocalJobRegistry）+ 子代理回报工具
+import SubagentRuntime from '../../subagent/subagent/src/index.ts'
+import * as SubagentSpawnInProcess from '../../subagent/subagent-spawn-in-process/src/index.ts'
+import * as ToolSubagent from '../../subagent/tool-subagent/src/index.ts'
+import * as ToolSubagentReport from '../../subagent/tool-subagent-report/src/index.ts'
+// 守护层：重复调用提醒（连续同参调用 3/5/8 次时注入提醒）+ 工具超时策略
+import * as RepeatToolReminder from '../../guard/repeat-tool-reminder/src/index.ts'
+import * as TimeoutPolicy from '../../guard/timeout-policy/src/index.ts'
 // 工具层：device_*（设备能力 — 通讯录/日历/剪贴板/文件/相册/邮件/拨号/相机/录音/应用）
 // 构建时与 harness-entry.ts 一同拷入 headless（见 build.mjs），故用同目录相对导入
 import { DeviceToolsPlugin } from './device-tools'
@@ -460,6 +479,67 @@ export class HarnessEngine {
       ToolTodo as unknown as { name: string; inject: string[]; apply: (ctx: Context, config: Record<string, unknown>) => void },
       { allowParallelInProgress: true },
     )
+    // ── 文件三件套：read/write/edit + str_replace_editor。
+    //    LocalFileSystem 经 node:fs → host-bridge fs shim（__harnessFsCall 同步桥）
+    //    落 App 沙箱目录，宿主文件系统本身即沙箱边界，故不装 fs-sandbox/
+    //    sandboxPolicy（其 confine 依赖 OS 级 ACL/Seatbelt，移动端不适用；
+    //    无 confining backend 时 tool-fs 的 escalation 字段自动不暴露）。
+    //    tool-fs-search（glob/grep）依赖 subprocess + ripgrep 二进制，移动端
+    //    无子进程能力，明确不装配（文件内搜索走 run_script 或 read）。
+    await ctx.plugin(
+      LocalFileSystem as unknown as { name: string; inject: string[]; apply: (ctx: Context, config: Record<string, unknown>) => void },
+      { cwd: config.cwd },
+    )
+    await ctx.plugin(
+      ToolFs as unknown as { name: string; inject: string[]; apply: (ctx: Context, config: Record<string, unknown>) => void },
+      {},
+    )
+    await ctx.plugin(
+      ToolStrReplaceEditor as unknown as { name: string; inject: string[]; apply: (ctx: Context, config: Record<string, unknown>) => void },
+      {},
+    )
+
+    // ── web_fetch：WebRuntime 服务 + HTTP 抓取实现 + tool-web（search:false —
+    //    搜索 provider 阶段 2 按配置接入）。抓取经 fetch polyfill（__harnessFetchStart）。
+    await ctx.plugin(WebRuntime)
+    await ctx.plugin(
+      WebFetchHttp as unknown as { name: string; inject: string[]; apply: (ctx: Context, config: Record<string, unknown>) => void },
+      {},
+    )
+    await ctx.plugin(
+      ToolWeb as unknown as { name: string; inject: string[]; apply: (ctx: Context, config: Record<string, unknown>) => void },
+      { search: false, fetch: true },
+    )
+
+    // ── subagent：进程内 spawn provider（无子进程依赖）— 子代理在同一 QuickJS
+    //    事件循环内由 agent factory 创建并单回合驱动；enableRunInBackground 时
+    //    后台任务经 ctx.jobs（LocalJobRegistry）挂进后台任务面板。
+    await ctx.plugin(SubagentRuntime)
+    await ctx.plugin(
+      SubagentSpawnInProcess as unknown as { name: string; inject: string[]; apply: (ctx: Context, config: Record<string, unknown>) => void },
+      {},
+    )
+    await ctx.plugin(
+      ToolSubagent as unknown as { name: string; inject: string[]; apply: (ctx: Context, config: Record<string, unknown>) => void },
+      { provider: 'spawn' },
+    )
+    await ctx.plugin(
+      ToolSubagentReport as unknown as { name: string; inject: string[]; apply: (ctx: Context, config: Record<string, unknown>) => void },
+      {},
+    )
+
+    // ── 守护层：repeat-tool-reminder（默认阈值 [3,5,8]，仅提醒不否决）+
+    //    timeout-policy（工具执行超时兜底；主引擎 setTimeout 为 no-op 桩，
+    //    实际超时仍由宿主层兜底，此件对齐桌面语义）。
+    await ctx.plugin(
+      RepeatToolReminder as unknown as { name: string; inject: string[]; apply: (ctx: Context, config: Record<string, unknown>) => void },
+      {},
+    )
+    await ctx.plugin(
+      TimeoutPolicy as unknown as { name: string; inject: string[]; apply: (ctx: Context, config: Record<string, unknown>) => void },
+      {},
+    )
+
     // device_* 工具（桥不可用时插件内部自动跳过注册，Node 冒烟环境零副作用）
     await ctx.plugin(DeviceToolsPlugin as unknown as { name: string; inject: string[]; apply: (ctx: Context) => void })
 

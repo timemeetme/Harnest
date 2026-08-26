@@ -82,6 +82,30 @@ enum FsBridge {
                 return json(["ok": false])
             }
 
+        case "rename":
+            let newPath = req["newPath"] as? String ?? ""
+            guard let target = resolve(engine: engine, path: newPath) else {
+                return err("path escapes sandbox: \(newPath)")
+            }
+            guard fm.fileExists(atPath: resolved.path) else {
+                return err("not found: \(path)")
+            }
+            try? fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if fm.fileExists(atPath: target.path) {
+                do { try fm.removeItem(atPath: target.path) } catch {
+                    return err("rename failed: target busy")
+                }
+            }
+            do {
+                try fm.moveItem(atPath: resolved.path, toPath: target.path)
+                return json(["ok": true])
+            } catch {
+                return err("rename failed: \(error.localizedDescription)")
+            }
+
+        case "realpath":
+            return json(["ok": true, "path": resolved.path])
+
         case "stat":
             guard fm.fileExists(atPath: resolved.path, isDirectory: &isDir) else {
                 return err("not found: \(path)")

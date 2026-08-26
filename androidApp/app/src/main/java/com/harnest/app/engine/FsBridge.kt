@@ -68,6 +68,21 @@ object FsBridge {
                         .put("size", if (isDir) 0L else resolved.length())
                         .put("mtimeMs", resolved.lastModified())
                 }
+                "rename" -> run {
+                    val newPath = req.optString("newPath", "")
+                    val target = resolve(engine, newPath)
+                        ?: return@run err("path escapes sandbox: $newPath")
+                    if (!resolved.exists()) return@run err("not found: $path")
+                    try {
+                        target.parentFile?.mkdirs()
+                        if (target.exists() && !target.delete()) return@run err("rename failed: target busy")
+                        if (resolved.renameTo(target)) JSONObject().put("ok", true)
+                        else err("rename failed: $path")
+                    } catch (e: Throwable) {
+                        err("rename failed: ${e.message}")
+                    }
+                }
+                "realpath" -> JSONObject().put("ok", true).put("path", resolved.path)
                 else -> err("unknown op: $op")
             }.toString()
         } catch (e: Throwable) {

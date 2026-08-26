@@ -223,6 +223,39 @@ static JSValue qjs_fs_call(JSContext* ctx, JSValueConst, int argc, JSValueConst*
         JS_FreeValue(ctx, args);
         return out;
     }
+    if (opStr == "rename") {
+        const char* newPathRaw = JS_ToCString(ctx, JS_GetPropertyStr(ctx, args, "newPath"));
+        std::string newPath = newPathRaw ? newPathRaw : "";
+        JS_FreeCString(ctx, newPathRaw);
+        std::string newResolved;
+        JSValue out = JS_NewObject(ctx);
+        if (!pathInsideCwd(newPath, newResolved)) {
+            JS_SetPropertyStr(ctx, out, "ok", JS_FALSE);
+            JS_SetPropertyStr(ctx, out, "error", JS_NewString(ctx, ("path escapes sandbox: " + newPath).c_str()));
+            JS_FreeValue(ctx, args);
+            return out;
+        }
+        if (!fs::exists(resolved, ec)) {
+            JS_SetPropertyStr(ctx, out, "ok", JS_FALSE);
+            JS_SetPropertyStr(ctx, out, "error", JS_NewString(ctx, ("not found: " + path).c_str()));
+            JS_FreeValue(ctx, args);
+            return out;
+        }
+        fs::path np(newResolved);
+        if (np.has_parent_path()) fs::create_directories(np.parent_path(), ec);
+        fs::rename(resolved, newResolved, ec);
+        JS_SetPropertyStr(ctx, out, "ok", JS_NewBool(ctx, !ec));
+        if (ec) JS_SetPropertyStr(ctx, out, "error", JS_NewString(ctx, ec.message().c_str()));
+        JS_FreeValue(ctx, args);
+        return out;
+    }
+    if (opStr == "realpath") {
+        JSValue out = JS_NewObject(ctx);
+        JS_SetPropertyStr(ctx, out, "ok", JS_TRUE);
+        JS_SetPropertyStr(ctx, out, "path", JS_NewString(ctx, resolved.c_str()));
+        JS_FreeValue(ctx, args);
+        return out;
+    }
 
     JS_FreeValue(ctx, args);
     JSValue out = JS_NewObject(ctx);

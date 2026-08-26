@@ -442,10 +442,11 @@
       this._queue = [];
       this._closed = false;
       this._errored = null;
+      this._canceled = false;
       this._waiters = [];
       this._controller = {
         enqueue: (v) => {
-          if (this._closed || this._errored) return;
+          if (this._closed || this._errored || this._canceled) return;
           this._queue.push(v);
           this._settle();
         },
@@ -463,11 +464,25 @@
       if (typeof source.start === 'function') source.start(this._controller);
     }
 
+    _cancel() {
+      if (this._errored) return;
+      this._canceled = true;
+      this._queue.length = 0;
+      this._settle();
+    }
+
     _settle() {
       while (this._waiters.length > 0) {
         const w = this._waiters.shift();
         if (this._errored !== null) {
           w.reject(this._errored);
+        } else if (this._canceled || this._closed) {
+          // canceled 优先于队列余量：丢弃剩余数据立即结束
+          if (this._canceled || this._queue.length === 0) {
+            w.resolve({ done: true, value: undefined });
+            continue;
+          }
+          w.resolve({ done: false, value: this._queue.shift() });
         } else if (this._queue.length > 0) {
           w.resolve({ done: false, value: this._queue.shift() });
         } else if (this._closed) {
@@ -488,6 +503,7 @@
             stream._settle();
           });
         },
+        cancel() { stream._cancel(); return Promise.resolve(); },
         releaseLock() { /* no-op */ },
       };
     }
@@ -775,43 +791,233 @@
     return JSON.parse(resultJson);
   }
 
+  // 宿主错误串 → Node errno 代码映射（内核 isENOENT/isEEXIST 等按 e.code 判定）
+  function fsErr(message, code) {
+    const e = new Error(message);
+    if (code) e.code = code;
+    return e;
+  }
+  function mapFsError(r, verb, path) {
+    const msg = (r && r.error) || (verb + ' failed: ' + path);
+    let code;
+    if (/not found|no such|ENOENT/i.test(msg)) code = 'ENOENT';
+    else if (/EEXIST|already exists/i.test(msg)) code = 'EEXIST';
+    else if (/not a directory|ENOTDIR/i.test(msg)) code = 'ENOTDIR';
+    else if (/is a directory|EISDIR/i.test(msg)) code = 'EISDIR';
+    else if (/permission|EACCES/i.test(msg)) code = 'EACCES';
+    return fsErr(msg, code);
+  }
+
+  // ── b64 编解码（宿主桥二进制读写用）——自包含，不依赖 Prelude ──
+  const B64CH = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  function b64FromBytes(u8) {
+    let s = '';
+    for (let i = 0; i < u8.length; i += 3) {
+      const a = u8[i], b = i + 1 < u8.length ? u8[i + 1] : 0, c = i + 2 < u8.length ? u8[i + 2] : 0;
+      s += B64CH[a >> 2] + B64CH[((a & 3) << 4) | (b >> 4)]
+        + (i + 1 < u8.length ? B64CH[((b & 15) << 2) | (c >> 6)] : '=')
+        + (i + 2 < u8.length ? B64CH[c & 63] : '=');
+    }
+    return s;
+  }
+  function bytesFromB64(s) {
+    const t = s.replace(/=+$/, '');
+    const out = new Uint8Array(Math.floor(t.length * 3 / 4));
+    let o = 0;
+    for (let i = 0; i < t.length; i += 4) {
+      const n = (B64CH.indexOf(t[i]) << 18) | (B64CH.indexOf(t[i + 1]) << 12)
+        | ((i + 2 < t.length ? B64CH.indexOf(t[i + 2]) : 0) << 6)
+        | (i + 3 < t.length ? B64CH.indexOf(t[i + 3]) : 0);
+      out[o++] = (n >> 16) & 255;
+      if (i + 2 < t.length) out[o++] = (n >> 8) & 255;
+      if (i + 3 < t.length) out[o++] = n & 255;
+    }
+    return out;
+  }
+
+  function isBytes(v) { return v instanceof Uint8Array || (typeof Buffer !== 'undefined' && v instanceof Buffer); }
+
+  // stat 结果 → Node Stats/BigIntStats 形状（内核 versionOf 需 dev/ino/size/mtimeNs/ctimeNs；
+  // fs-local probe 另消费 mode：BigInt 位运算，宿主沙箱无权限位，用常规值近似）
+  function statsShape(r, bigint) {
+    const size = Number(r.size || 0);
+    const mtimeMs = Number(r.mtimeMs || 0);
+    const isDir = !!r.isDir;
+    if (bigint) {
+      const ns = BigInt(Math.round(mtimeMs * 1e6));
+      return {
+        dev: 0n, ino: 0n, mode: isDir ? 0o40755n : 0o100644n, size: BigInt(size), mtimeNs: ns, ctimeNs: ns,
+        mtimeMs: mtimeMs, ctimeMs: mtimeMs,
+        isDirectory: () => isDir, isFile: () => !isDir, isSymbolicLink: () => false,
+      };
+    }
+    return {
+      dev: 0, ino: 0, mode: isDir ? 0o40755 : 0o100644, size, mtimeMs, ctimeMs: mtimeMs,
+      isDirectory: () => isDir, isFile: () => !isDir, isSymbolicLink: () => false,
+    };
+  }
+
+  // Dirent 形状（listDirectory 只用 .name；宿主沙箱无 symlink）
+  function direntOf(entry) {
+    const name = typeof entry === 'string' ? entry : String(entry && entry.name);
+    const dir = typeof entry === 'object' && entry !== null ? !!entry.isDir : false;
+    return { name, isDirectory: () => dir, isFile: () => !dir, isSymbolicLink: () => false };
+  }
+
+  // 伪 FileHandle：writeFileAtomic 的 open('wx')/chmod/writeFile/sync/close 与
+  // readTextForDiff 的 open('r')/stat/read/close 均在此承接（宿主无 fd 概念，
+  // 'wx' 句柄写缓冲、close 时经 writeFile op 落盘；'r' 句柄一次性读全量）
+  function makeFakeHandle(path, flags) {
+    if (flags === 'wx' || flags === 'ax') {
+      let content = '';
+      return {
+        chmod: () => Promise.resolve(),
+        writeFile: (data) => { content = typeof data === 'string' ? data : String(data); return Promise.resolve(); },
+        sync: () => Promise.resolve(),
+        close: () => new Promise((resolve, reject) => {
+          const r = fsCall('writeFile', { path, data: content });
+          r.ok ? resolve() : reject(mapFsError(r, 'writeFile', path));
+        }),
+        stat: () => Promise.reject(fsErr('ENOENT: fake handle', 'ENOENT')),
+      };
+    }
+    // 读句柄：首次使用时拉全量字节
+    let bytes = null;
+    const load = () => {
+      if (bytes === null) {
+        const r = fsCall('readFile', { path, text: false });
+        if (!r.ok) throw mapFsError(r, 'readFile', path);
+        bytes = bytesFromB64(String(r.data || ''));
+      }
+      return bytes;
+    };
+    return {
+      stat: () => {
+        const r = fsCall('stat', { path });
+        return r.ok ? Promise.resolve(statsShape(r, false)) : Promise.reject(mapFsError(r, 'stat', path));
+      },
+      read: (buffer, offset, length) => new Promise((resolve, reject) => {
+        try {
+          const src = load();
+          const take = Math.min(length, Math.max(0, src.length - offset));
+          if (buffer && buffer.set) buffer.set(src.subarray(offset, offset + take), offset);
+          resolve({ bytesRead: take });
+        } catch (e) { reject(e); }
+      }),
+      close: () => Promise.resolve(),
+    };
+  }
+
+  // createReadStream → 最小异步可迭代流（readWholeBytes/streamWholeText 只 for-await 消费 chunk）
+  function makeFakeStream(path, opts) {
+    opts = opts || {};
+    return {
+      [Symbol.asyncIterator]() {
+        let done = false;
+        return {
+          next: () => {
+            if (done) return Promise.resolve({ done: true });
+            done = true;
+            if (opts.signal && opts.signal.aborted) {
+              return Promise.reject(fsErr('The operation was aborted', 'ABORT_ERR'));
+            }
+            try {
+              const r = fsCall('readFile', { path, text: false });
+              if (!r.ok) return Promise.reject(mapFsError(r, 'readFile', path));
+              let bytes = bytesFromB64(String(r.data || ''));
+              if (typeof opts.end === 'number' && bytes.length > opts.end) bytes = bytes.subarray(0, opts.end);
+              return Promise.resolve({ done: false, value: bytes });
+            } catch (e) { return Promise.reject(e); }
+          },
+        };
+      },
+      on() { return this; },
+      destroy() {},
+      close() {},
+    };
+  }
+
   const fsShim = {
     existsSync(path) { return !!fsCall('exists', { path }).exists; },
-    readFileSync(path, _opts) {
-      const r = fsCall('readFile', { path });
-      if (!r.ok) throw new Error(r.error || ('readFile failed: ' + path));
-      return r.data;
+    readFileSync(path, opts) {
+      const enc = typeof opts === 'string' ? opts : (opts && opts.encoding);
+      const binary = enc === undefined || enc === null;
+      const r = fsCall('readFile', { path, text: !binary });
+      if (!r.ok) throw mapFsError(r, 'readFile', path);
+      if (binary) return bytesFromB64(String(r.data || ''));
+      return String(r.data || '');
     },
     writeFileSync(path, data) {
-      const text = typeof data === 'string' ? data : String(data);
-      const r = fsCall('writeFile', { path, data: text });
-      if (!r.ok) throw new Error(r.error || ('writeFile failed: ' + path));
+      let r;
+      if (isBytes(data)) {
+        r = fsCall('writeFile', { path, data: b64FromBytes(data), base64: true });
+      } else {
+        r = fsCall('writeFile', { path, data: typeof data === 'string' ? data : String(data) });
+      }
+      if (!r.ok) throw mapFsError(r, 'writeFile', path);
     },
-    readdirSync(path) {
+    readdirSync(path, opts) {
       const r = fsCall('readdir', { path });
-      if (!r.ok) throw new Error(r.error || ('readdir failed: ' + path));
-      return r.entries;
+      if (!r.ok) throw mapFsError(r, 'readdir', path);
+      const entries = r.entries || [];
+      const withTypes = !!(opts && opts.withFileTypes);
+      return withTypes ? entries.map(direntOf) : entries.map(e => (typeof e === 'string' ? e : String(e && e.name)));
     },
     mkdirSync(path, opts) {
       const r = fsCall('mkdir', { path, recursive: !!(opts && opts.recursive) });
-      if (!r.ok) throw new Error(r.error || ('mkdir failed: ' + path));
+      if (!r.ok) throw mapFsError(r, 'mkdir', path);
     },
     rmSync(path, opts) {
-      const r = fsCall('rm', { path, recursive: !!(opts && opts.recursive) });
-      if (!r.ok) throw new Error(r.error || ('rm failed: ' + path));
+      const r = fsCall('rm', { path, recursive: !!(opts && opts.recursive), force: !!(opts && opts.force) });
+      if (!r.ok && !(opts && opts.force)) throw mapFsError(r, 'rm', path);
     },
-    statSync(path) {
+    statSync(path, opts) {
       const r = fsCall('stat', { path });
-      if (!r.ok) throw new Error(r.error || ('stat failed: ' + path));
-      return { isDirectory: () => !!r.isDir, isFile: () => !r.isDir, size: r.size, mtimeMs: r.mtimeMs };
+      if (!r.ok) throw mapFsError(r, 'stat', path);
+      return statsShape(r, !!(opts && opts.bigint));
     },
+    lstatSync(path, opts) {
+      // 宿主沙箱无 symlink：lstat 与 stat 等价
+      return fsShim.statSync(path, opts);
+    },
+    realpathSync(path) {
+      // resolve() 已在宿主侧规范化/限沙箱，直接返回
+      return path;
+    },
+    renameSync(oldPath, newPath) {
+      const r = fsCall('rename', { path: oldPath, newPath });
+      if (!r.ok) throw mapFsError(r, 'rename', oldPath);
+    },
+    linkSync(existingPath, newPath) {
+      // 无硬链接：以「目标不存在才复制」近似 no-replace 语义
+      if (fsCall('exists', { path: newPath }).exists) {
+        throw fsErr('EEXIST: file already exists: ' + newPath, 'EEXIST');
+      }
+      const bytes = fsShim.readFileSync(existingPath);
+      fsShim.writeFileSync(newPath, bytes);
+    },
+    chmodSync() { /* 沙箱内无 POSIX 权限位语义：no-op */ },
+    createReadStream(path, opts) { return makeFakeStream(path, opts); },
     promises: {
-      async readFile(path) { return fsShim.readFileSync(path); },
+      async readFile(path, opts) { return fsShim.readFileSync(path, opts); },
       async writeFile(path, data) { return fsShim.writeFileSync(path, data); },
-      async readdir(path) { return fsShim.readdirSync(path); },
+      async readdir(path, opts) { return fsShim.readdirSync(path, opts); },
       async mkdir(path, opts) { return fsShim.mkdirSync(path, opts); },
       async rm(path, opts) { return fsShim.rmSync(path, opts); },
-      async stat(path) { return fsShim.statSync(path); },
+      async stat(path, opts) { return fsShim.statSync(path, opts); },
+      async lstat(path, opts) { return fsShim.lstatSync(path, opts); },
+      async realpath(path) { return fsShim.realpathSync(path); },
+      async rename(oldPath, newPath) { return fsShim.renameSync(oldPath, newPath); },
+      async link(existingPath, newPath) { return fsShim.linkSync(existingPath, newPath); },
+      async chmod() { /* no-op */ },
+      async open(path, flags) {
+        if (flags === 'wx' || flags === 'ax') {
+          if (fsCall('exists', { path }).exists) {
+            throw fsErr('EEXIST: file already exists: ' + path, 'EEXIST');
+          }
+        }
+        return makeFakeHandle(path, flags);
+      },
     },
   };
 
@@ -821,10 +1027,13 @@
     if (global.__HARNESS_SHIMS) {
       global.__HARNESS_SHIMS.fs = fsShim;
       global.__HARNESS_SHIMS.defaultFsShim = fsShim;
+      // fs-local 直消费 node:fs/promises（realpath/open/rename 等 11 个 API）
+      global.__HARNESS_SHIMS.fsPromises = fsShim.promises;
     }
     if (typeof global.require !== 'function') {
       global.require = function (p) {
         if (p === 'fs' || p === 'node:fs') return fsShim;
+        if (p === 'fs/promises' || p === 'node:fs/promises') return fsShim.promises;
         if (global.__HARNESS_SHIMS) return global.__HARNESS_SHIMS;
         return {};
       };
