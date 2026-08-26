@@ -220,6 +220,13 @@
 | 2 | 「Implement the plan as specified, it is attached for your reference. Do NOT edit the plan file itself.」 | `95209237fb` feat(kernel)：阶段 1 落地（entry 装配 fs 工具三件套/web_fetch/subagent + shim 扩展 + 三端宿主 rename/realpath op + 三端 bundle 重分发）+ 本次 docs 收尾 |
 | 3 | 「继续」（会话恢复 ×2） | 同上，断点续实施 |
 
+### 22. kimi-k3 存量配置迁移批次（2026-08-26，W，Qoder 会话）
+
+| # | Prompt（逐字原文） | 产出提交 |
+|---|-------------------|----------|
+| 1 | 「现在在harmony手机里，设置页面，添加模型api时，kimi推荐的模型ID仍然没有看到kimi-k3」 | `dd549acc7e` fix(all)：三端 api_config 预设迁移 2026-08b（旧预设整表替换 + 定制列表补齐现役预设），鸿蒙重新构建装机验证（hilog 迁移日志 + 设备 api_config.json 实读确认 kimi-k3 可选），CI 三端全绿 |
+| 2 | 「后续所有修改都要在三端同时一致，同时合入」 | 新纪律写入 `.trae/rules/project_rules.md`（三端一致纪律条目 + HEAD 行同步）与长期记忆，随本次 docs 提交 |
+
 ---
 
 ## 二、当前项目进展汇总
@@ -227,8 +234,8 @@
 ### 2.1 仓库状态
 
 - **仓库**：`git@github.com:timemeetme/Harnest.git`，主分支 `main`
-- **当前 HEAD**：`95209237fb`（2026-08-26，内核能力补齐阶段 1；docs 收尾为本次提交）
-- **CI 状态**：三端全绿（HarmonyOS 3m45s / Android 3m35s / iOS 6m26s，95209237fb 触发；iOS FsBridge.swift 首次真实编译通过）
+- **当前 HEAD**：`dd549acc7e`（2026-08-26，三端 api_config 预设迁移 2026-08b；docs 收尾为本次提交）
+- **CI 状态**：三端全绿（Android 3m39s / HarmonyOS 3m53s / iOS 10m9s，dd549acc7e 触发）
 - **双机开发**：Mac（SSH heavencme 协作者）+ Windows（https + gh CLI，需手动挂系统代理 127.0.0.1:7890）
 
 ### 2.2 架构总览

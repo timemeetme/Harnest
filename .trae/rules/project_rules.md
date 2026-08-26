@@ -3,7 +3,7 @@
 > 本文件是 TRAE 项目记忆：每次会话自动加载，新会话开工前先读这里，避免重复踩坑。
 > 由 TRAE 生成并按项目进展自动维护：每次会话发生实质变更（新提交/新结论/新陷阱）时由当前会话直接更新。人工修改请同步更新「维护日志」。
 >
-> 最后同步 HEAD: 95209237fb （2026-08-26，Windows 机：内核能力补齐阶段 1——fs 工具三件套/web_fetch/subagent 进 mobile bundle（entry 装配 + shim 扩展 + 三端宿主 rename/realpath op）；docs 收尾为本次提交）
+> 最后同步 HEAD: dd549acc7e （2026-08-26，Windows 机：三端 api_config 预设迁移（2026-08b：旧预设整表替换 + 定制列表补齐现役预设，kimi-k3 真机可选，CI 三端全绿）+ 用户新纪律「三端同时一致同批合入」写入本文件）
 
 ## 项目身份
 
@@ -12,6 +12,7 @@
   - **macOS 机**（Mac）：SSH 密钥属 `heavencme`（协作者，push 已验证）；JDK17/homebrew、XcodeGen、iPhone 17 Pro 模拟器
   - **Windows 机**（`d:\Projects\HarnessApp`）：remote 走 https + gh CLI（已登录）；无 macOS，iOS 依赖 CI 验证
 - **提交风格**: Conventional Commits（`fix(ios):` / `test(ios):` / `fix(all):` / `ci(ios):` / `feat` / `docs`，scope 常为 ios/android/harmony/all）
+- **三端一致纪律（用户 2026-08-26 明确要求）**: 后续所有修改必须在 iOS / Android / 鸿蒙三端同时保持一致并同批合入 main——改动前先列三端对应文件清单逐端落地并互核取值/行为一致；同批提交推送，禁止只改单端留下漂移；发现历史漂移（如某端缺迁移逻辑）主动补齐再合入；门禁覆盖三端（Android compileDebugKotlin + 鸿蒙 hvigorw 本地跑，iOS 靠 CI，推送后盯三端 workflow 全绿）
 - **产品**: 跨平台 AI Agent 对话前端（harness 客户端），多 LLM provider、本地配置存储，四端（iOS/Android/鸿蒙/共享内核）
 
 ## 架构地图
