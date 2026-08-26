@@ -251,7 +251,7 @@
 
 | # | Prompt（逐字原文） | 产出提交 |
 |---|-------------------|----------|
-| 1 | 「更新远端代码；定位问题：现在模型验证都是提示 DeepSeek API stream from ...failed, 看不到详细报错原因。」 | `74cc1c4452` fix(all)：①stash→pull--ff-only→stash pop 合流远端 31 提交（内核 dsh-v0.1.1-rc.2/kimi-k3 迁移/low 档/沙箱定时器/fs tools/web_fetch/subagent），三端 Providers 冲突采用本地版本，鸿蒙补回 LEGACY_PRESET_MODELS；②根因：agent.ts turn 收口 LlmError 分支取 frozen failure（无 cause）吞掉底层 401/HTTP 详情（陷阱 28）；③修复：内核 LlmFailure 加可选 `detail` 字段携带 errorChain，三端宿主 msg+detail 展示；④transpiler 重建三端 harness.js 同 SHA256（618069fb）；门禁 iOS build+XCTest 14/14、Android compileDebugKotlin |
+| 1 | 「更新远端代码；定位问题：现在模型验证都是提示 DeepSeek API stream from ...failed, 看不到详细报错原因。」 | `74cc1c4452` fix(all)：①stash→pull--ff-only→stash pop 合流远端 31 提交（内核 dsh-v0.1.1-rc.2/kimi-k3 迁移/low 档/沙箱定时器/fs tools/web_fetch/subagent），三端 Providers 冲突采用本地版本，鸿蒙 Constants.ets 冲突解决时选择本地版本导致 LEGACY_PRESET_MODELS 块被覆盖（远端 dd549acc7e 已添加，grep 引用链后补回）；②根因：agent.ts turn 收口 LlmError 分支取 frozen failure（无 cause）吞掉底层 401/HTTP 详情（陷阱 28）；③修复：内核 LlmFailure 加可选 `detail` 字段携带 errorChain，三端宿主 msg+detail 展示；④transpiler 重建三端 harness.js 同 SHA256（618069fb）；门禁 iOS build+XCTest 14/14、Android compileDebugKotlin |
 
 ---
 
