@@ -53,6 +53,58 @@ static std::string jsonEscape(const std::string& s) {
     return out;
 }
 
+// ── 最小 base64（OOXML 二进制桥；标准字符表 + '=' 填充，解码跳过空白） ──
+static const char* kB64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+static std::string base64Encode(const unsigned char* data, size_t len) {
+    std::string out;
+    out.reserve((len + 2) / 3 * 4);
+    for (size_t i = 0; i < len; i += 3) {
+        unsigned int n = (unsigned int)data[i] << 16;
+        if (i + 1 < len) n |= (unsigned int)data[i + 1] << 8;
+        if (i + 2 < len) n |= (unsigned int)data[i + 2];
+        out += kB64[(n >> 18) & 63];
+        out += kB64[(n >> 12) & 63];
+        out += (i + 1 < len) ? kB64[(n >> 6) & 63] : '=';
+        out += (i + 2 < len) ? kB64[n & 63] : '=';
+    }
+    return out;
+}
+
+static int b64Index(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+') return 62;
+    if (c == '/') return 63;
+    return -1;
+}
+
+static bool base64Decode(const std::string& in, std::string& out) {
+    out.clear();
+    int vals[4];
+    int vi = 0;
+    for (char c : in) {
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') continue; // 空白跳过
+        if (c == '=') { vals[vi++] = -2; }                            // 填充
+        else {
+            int v = b64Index(c);
+            if (v < 0) return false;                                  // 非法字符
+            vals[vi++] = v;
+        }
+        if (vi == 4) {
+            if (vals[0] < 0 || vals[1] < 0) return false;             // 前两字符不可为填充
+            unsigned int n = ((unsigned int)vals[0] << 18) | ((unsigned int)vals[1] << 12) |
+                (vals[2] >= 0 ? (unsigned int)vals[2] << 6 : 0) | (vals[3] >= 0 ? (unsigned int)vals[3] : 0);
+            out += (char)((n >> 16) & 0xFF);
+            if (vals[2] >= 0) out += (char)((n >> 8) & 0xFF);
+            if (vals[3] >= 0) out += (char)(n & 0xFF);
+            vi = 0;
+        }
+    }
+    return vi == 0; // 必须整组结束
+}
+
 // ══════════════════════════════════════════════════════════
 // QuickJS 宿主函数（经 JS_SetContextOpaque 到达所属实例 — per-instance 关键）
 // ══════════════════════════════════════════════════════════
@@ -177,6 +229,59 @@ static JSValue qsb_write(JSContext* ctx, JSValueConst, int argc, JSValueConst* a
     return JS_TRUE;
 }
 
+/** OOXML 沙箱内读二进制：返回 JSON envelope 字符串 {"ok":true,"dataBase64":"…"}；
+ *  越界/打开失败 → 抛 TypeError（与 __sbRead/__sbWrite 一致，prelude parseEnvelope 不处理本端 throw） */
+static JSValue qsb_read_b64(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    ScriptEngine* e = EngineOf(ctx);
+    if (!e || argc < 1) return JS_ThrowTypeError(ctx, "__sbReadB64: bad args");
+    const char* p = JS_ToCString(ctx, argv[0]);
+    if (!p) return JS_ThrowTypeError(ctx, "__sbReadB64: bad path");
+    std::string resolved;
+    bool inside = e->resolveInSandbox(p, resolved);
+    JS_FreeCString(ctx, p);
+    if (!inside) return JS_ThrowTypeError(ctx, "__sbReadB64: path escapes sandbox");
+    std::ifstream f(resolved, std::ios::binary);
+    if (!f) return JS_ThrowTypeError(ctx, "__sbReadB64: open failed");
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    std::string data = ss.str();
+    std::string env = "{\"ok\":true,\"dataBase64\":\"" +
+        base64Encode(reinterpret_cast<const unsigned char*>(data.data()), data.size()) + "\"}";
+    return JS_NewStringLen(ctx, env.data(), env.size());
+}
+
+/** OOXML 沙箱内写二进制（base64 入参）：返回 JSON envelope 字符串 {"ok":true}；
+ *  越界/解码失败/写失败 → 抛 TypeError；成功把相对路径登记到 writtenFiles */
+static JSValue qsb_write_b64(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    ScriptEngine* e = EngineOf(ctx);
+    if (!e || argc < 2) return JS_ThrowTypeError(ctx, "__sbWriteB64: bad args");
+    const char* p = JS_ToCString(ctx, argv[0]);
+    const char* b64 = JS_ToCString(ctx, argv[1]);
+    if (!p || !b64) {
+        JS_FreeCString(ctx, p);
+        JS_FreeCString(ctx, b64);
+        return JS_ThrowTypeError(ctx, "__sbWriteB64: bad args");
+    }
+    std::string path = p;
+    std::string resolved;
+    bool inside = e->resolveInSandbox(path, resolved);
+    JS_FreeCString(ctx, p);
+    if (!inside) {
+        JS_FreeCString(ctx, b64);
+        return JS_ThrowTypeError(ctx, "__sbWriteB64: path escapes sandbox");
+    }
+    std::string bytes;
+    bool decoded = base64Decode(b64, bytes);
+    JS_FreeCString(ctx, b64);
+    if (!decoded) return JS_ThrowTypeError(ctx, "__sbWriteB64: invalid base64");
+    std::ofstream f(resolved, std::ios::binary | std::ios::trunc);
+    if (!f) return JS_ThrowTypeError(ctx, "__sbWriteB64: open failed");
+    f.write(bytes.data(), (std::streamsize)bytes.size());
+    if (!f.good()) return JS_ThrowTypeError(ctx, "__sbWriteB64: write failed");
+    e->writtenFiles.insert(path);
+    return JS_NewString(ctx, "{\"ok\":true}");
+}
+
 /** 显式收尾（成功）：valueJson 非 JSON 时按纯字符串字面量 */
 static JSValue qsb_settle(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
     ScriptEngine* e = EngineOf(ctx);
@@ -281,6 +386,8 @@ bool ScriptEngine::init() {
     JS_SetPropertyStr(ctx_, global, "__sbWrite", JS_NewCFunction(ctx_, qsb_write, "__sbWrite", 2));
     JS_SetPropertyStr(ctx_, global, "__sbSettle", JS_NewCFunction(ctx_, qsb_settle, "__sbSettle", 1));
     JS_SetPropertyStr(ctx_, global, "__sbSettleErr", JS_NewCFunction(ctx_, qsb_settle_err, "__sbSettleErr", 1));
+    JS_SetPropertyStr(ctx_, global, "__sbReadB64", JS_NewCFunction(ctx_, qsb_read_b64, "__sbReadB64", 1));
+    JS_SetPropertyStr(ctx_, global, "__sbWriteB64", JS_NewCFunction(ctx_, qsb_write_b64, "__sbWriteB64", 2));
     JS_FreeValue(ctx_, global);
 
     JSValue r = JS_Eval(ctx_, kBootstrap, strlen(kBootstrap), "<bootstrap>", JS_EVAL_TYPE_GLOBAL);
@@ -320,13 +427,26 @@ void ScriptEngine::dispose() {
     pendingDeferred = nullptr;
 }
 
-bool ScriptEngine::run(const std::string& source, uint64_t timeoutMs, std::string& outJson) {
+bool ScriptEngine::run(const std::string& source, const std::string& prelude, uint64_t timeoutMs, std::string& outJson) {
     startMs_ = NowMs();
     deadlineMs_ = timeoutMs > 0 ? startMs_ + timeoutMs : 0;
     logs_.clear();
+    writtenFiles.clear();
     settled = false;
     settledJson.clear();
     running = false;
+
+    // OOXML prelude：注入 runtimeJS 之后、用户代码之前全局 eval（挂载 globalThis.Prelude + readBytes/writeBytes）
+    if (!prelude.empty()) {
+        JSValue pv = JS_Eval(ctx_, prelude.c_str(), prelude.size(), "<prelude>", JS_EVAL_TYPE_GLOBAL);
+        if (JS_IsException(pv)) {
+            JSValue err = JS_GetException(ctx_);
+            outJson = buildEnvelope(false, "\"" + jsonEscape(std::string("prelude: ") + jsErrorString(err)) + "\"");
+            JS_FreeValue(ctx_, err);
+            return true;
+        }
+        JS_FreeValue(ctx_, pv);
+    }
 
     JSValue result = JS_Eval(ctx_, source.c_str(), source.size(), "<script>", JS_EVAL_TYPE_GLOBAL);
     if (JS_IsException(result)) {
@@ -475,6 +595,15 @@ std::string ScriptEngine::buildEnvelope(bool ok, const std::string& payloadJson)
         if (i > 0) j += ",";
         j += "\"" + jsonEscape(logs_[i]) + "\"";
     }
+    j += "],\"files\":[";
+    {
+        bool first = true;
+        for (const auto& wf : writtenFiles) {
+            if (!first) j += ",";
+            first = false;
+            j += "\"" + jsonEscape(wf) + "\"";
+        }
+    }
     j += "]}";
     return j;
 }
@@ -585,10 +714,10 @@ napi_value NativeScriptEngineCreate(napi_env env, napi_callback_info info) {
     return MakeInt(env, id);
 }
 
-// scriptEngineRun(engineId: number, source: string, timeoutMs?: number) → Promise<string>
+// scriptEngineRun(engineId: number, source: string, timeoutMs?: number, preludeSource?: string) → Promise<string>
 napi_value NativeScriptEngineRun(napi_env env, napi_callback_info info) {
-    size_t argc = 3;
-    napi_value args[3];
+    size_t argc = 4;
+    napi_value args[4];
     napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
     napi_deferred deferred = nullptr;
     napi_value promise = nullptr;
@@ -609,8 +738,11 @@ napi_value NativeScriptEngineRun(napi_env env, napi_callback_info info) {
     std::string source = ArgToString(env, args[1]);
     int32_t timeoutMs = 60000;
     if (argc >= 3) napi_get_value_int32(env, args[2], &timeoutMs);
+    // OOXML prelude（可选第 4 参）：ArkTS 从 rawfile 加载的 prelude.js 源码，run 内先于用户代码 eval
+    std::string prelude;
+    if (argc >= 4) prelude = ArgToString(env, args[3]);
     std::string outJson;
-    if (e->run(source, timeoutMs > 0 ? (uint64_t)timeoutMs : 0, outJson)) {
+    if (e->run(source, prelude, timeoutMs > 0 ? (uint64_t)timeoutMs : 0, outJson)) {
         napi_resolve_deferred(env, deferred, MakeString(env, outJson));
     } else {
         e->napiEnv = env;

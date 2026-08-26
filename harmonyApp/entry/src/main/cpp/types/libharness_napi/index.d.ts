@@ -40,11 +40,13 @@ export const scriptEngineCreate: (cwd: string) => number;
 
 /**
  * 执行脚本，永远返回 Promise<envelope JSON 字符串>：
- *   {"ok":true,"value":…,"durationMs":n,"logs":[…]}
- *   {"ok":false,"error":"…","durationMs":n,"logs":[…]}
+ *   {"ok":true,"value":…,"durationMs":n,"logs":[…],"files":[…]}
+ *   {"ok":false,"error":"…","durationMs":n,"logs":[…],"files":[…]}
  * timeoutMs 缺省 60000，0 = 不限时。
+ * preludeSource 非空时在用户代码之前全局 eval（OOXML 预置库 prelude.js，失败按脚本异常收尾）。
+ * files = 本轮经 writeText/writeBytes 写入沙箱的相对路径列表。
  */
-export const scriptEngineRun: (engineId: number, source: string, timeoutMs?: number) => Promise<string>;
+export const scriptEngineRun: (engineId: number, source: string, timeoutMs?: number, preludeSource?: string) => Promise<string>;
 
 /** 销毁沙箱引擎（挂起 run 强制以 "engine disposed" 收尾）→ 是否销毁成功 */
 export const scriptEngineDispose: (engineId: number) => boolean;

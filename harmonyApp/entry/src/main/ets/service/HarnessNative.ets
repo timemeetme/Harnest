@@ -415,9 +415,10 @@ export class HarnessNative {
     harness.scriptEngineSetFetchHandler(engineId, handler);
   }
 
-  /** 【4】执行沙箱脚本（返回 envelope JSON：ok/value|error/durationMs/logs） */
-  async scriptEngineRun(engineId: number, source: string, timeoutMs: number): Promise<string> {
-    const raw: string = await harness.scriptEngineRun(engineId, source, timeoutMs);
+  /** 【4】执行沙箱脚本（返回 envelope JSON：ok/value|error/durationMs/logs/files；
+   *  preludeSource 非空时先于用户代码全局 eval，OOXML 预置库 prelude.js 用） */
+  async scriptEngineRun(engineId: number, source: string, timeoutMs: number, preludeSource: string): Promise<string> {
+    const raw: string = await harness.scriptEngineRun(engineId, source, timeoutMs, preludeSource);
     return raw;
   }
 

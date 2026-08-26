@@ -1,6 +1,7 @@
 import { common } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import http from '@ohos.net.http';
+import util from '@ohos.util';
 import {
   UiState, ChatMessage, MessageRole, SessionUi, LiveItem,
   PendingQuestion, PendingQuestionItem, PendingOption, BgJobUi, LogLineUi,
@@ -66,6 +67,8 @@ export class AppViewModel {
   private logSeq: number = 0;
   /** 脚本沙箱 engineId（App 级复用，-1 = 未创建；惰性初始化于首次 runScript） */
   private scriptEngineId: number = -1;
+  /** OOXML prelude 源码缓存（rawfile prelude.js，null = 未加载；'' = 加载失败不再重试） */
+  private preludeSource: string | null = null;
 
   /** Index 启动时调用 */
   init(context: common.Context): void {
@@ -190,11 +193,34 @@ export class AppViewModel {
     });
   };
 
-  /** 执行沙箱脚本：envelope JSON → Record（ok/value/error/durationMs/logs） */
+  /** 执行沙箱脚本：envelope JSON → Record（ok/value/error/durationMs/logs/files） */
   private async runScript(source: string, timeoutMs: number): Promise<Record<string, Object>> {
     this.ensureScriptEngine();
-    const envelopeRaw = await HarnessNative.getInstance().scriptEngineRun(this.scriptEngineId, source, timeoutMs);
+    const prelude = await this.loadPrelude();
+    const envelopeRaw = await HarnessNative.getInstance().scriptEngineRun(this.scriptEngineId, source, timeoutMs, prelude);
     return JSON.parse(envelopeRaw) as Record<string, Object>;
+  }
+
+  /** OOXML 预置库（rawfile prelude.js）：App 级只读一次；加载失败降级空串跳过注入，不阻塞普通脚本 */
+  private async loadPrelude(): Promise<string> {
+    if (this.preludeSource !== null) {
+      return this.preludeSource;
+    }
+    if (this.context === null) {
+      return '';
+    }
+    try {
+      const buf = await this.context.resourceManager.getRawFileContent('prelude.js');
+      if (buf && buf.length > 0) {
+        const decoder = util.TextDecoder.create('utf-8');
+        this.preludeSource = decoder.decodeWithStream(buf, { stream: false });
+        return this.preludeSource;
+      }
+    } catch (e) {
+      hilog.warn(DOMAIN, TAG, 'load prelude.js failed: %{public}s', JSON.stringify(e));
+    }
+    this.preludeSource = '';
+    return '';
   }
 
   // ── 会话管理 ────────────────────────────────────────────────

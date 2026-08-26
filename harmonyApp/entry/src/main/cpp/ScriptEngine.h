@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 #include <utility>
 
 namespace script {
@@ -39,10 +40,11 @@ struct ScriptEngine {
     bool init();
     void dispose();
 
-    /** eval source（timeoutMs=0 不限时）。
+    /** eval source（timeoutMs=0 不限时；prelude 非空时在注入 runtimeJS 之后、
+     *  执行 source 之前先全局 eval，失败按脚本异常收尾 envelope）。
      *  返回 true = 同步完成（outJson = envelope）；
      *  返回 false = 异步挂起（run 级 Promise 或 fetch 未决），napi 层挂 deferred 等结算。 */
-    bool run(const std::string& source, uint64_t timeoutMs, std::string& outJson);
+    bool run(const std::string& source, const std::string& prelude, uint64_t timeoutMs, std::string& outJson);
 
     /** 宿主 HTTP 完成下行：resolve/reject fetchId 的 Promise 并 pump jobs。
      *  之后 napi 层检查 settled 决定是否 resolve pendingDeferred。 */
@@ -72,6 +74,8 @@ struct ScriptEngine {
         pendingFetches_[id] = {resolve, reject};
     }
     bool resolveInSandbox(const std::string& path, std::string& out);
+    /** OOXML：写入沙箱的相对路径登记（随 envelope files 字段回传，execute 入口清空） */
+    std::set<std::string> writtenFiles;
 
 private:
     static int interruptHandler(JSRuntime* rt, void* opaque);
@@ -92,7 +96,7 @@ private:
 // ── napi 入口（napi_init.cpp 注册，并入 libharness_napi.so 导出面） ──
 // scriptEngineCreate(cwd: string) → number
 napi_value NativeScriptEngineCreate(napi_env env, napi_callback_info info);
-// scriptEngineRun(engineId: number, source: string, timeoutMs?: number) → Promise<string>
+// scriptEngineRun(engineId: number, source: string, timeoutMs?: number, preludeSource?: string) → Promise<string>
 napi_value NativeScriptEngineRun(napi_env env, napi_callback_info info);
 // scriptEngineDispose(engineId: number) → boolean
 napi_value NativeScriptEngineDispose(napi_env env, napi_callback_info info);
