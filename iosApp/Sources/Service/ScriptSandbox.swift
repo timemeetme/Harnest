@@ -24,8 +24,21 @@ final class ScriptSandbox: @unchecked Sendable {
     private let session: URLSession
     private let root: URL
     private let runLock = NSLock()
+    private let stateLock = NSLock()
+    /// 本次运行内经 __sbWriteB64 写出的沙箱相对路径（供结果透传）
+    private var writtenFiles: Set<String> = []
     /// 仅在沙箱队列访问（__sbFetch 桥同步执行期）
     private var nextFetchId: Int32 = 1
+
+    /// 沙箱根（Documents/Scripts）：DeviceBridge pick 落点复用
+    var sandboxRoot: URL { root }
+
+    /// OOXML 预置库（sandbox-prelude，IIFE 挂载 globalThis.Prelude + readBytes/writeBytes）
+    private lazy var preludeJS: String? = {
+        guard let url = Bundle.main.url(forResource: "prelude", withExtension: "js"),
+              let src = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        return src
+    }()
 
     private init() {
         let cfg = URLSessionConfiguration.ephemeral
@@ -41,10 +54,12 @@ final class ScriptSandbox: @unchecked Sendable {
     // MARK: - 执行入口
 
     /// 同步执行一段 JS（DeviceBridge runScript case 调用，后台线程）。
-    /// 返回给内核的 envelope：{ok, result, stdout, stdoutTruncated, error, timedOut, durationMs}。
+    /// 返回给内核的 envelope：{ok, result, stdout, stdoutTruncated, error, timedOut, durationMs, files}。
     func runSync(code: String, timeoutMs: Int) -> [String: Any] {
         runLock.lock()
         defer { runLock.unlock() }
+
+        stateLock.withLock { writtenFiles = [] }
 
         let timeout = min(max(timeoutMs, 1_000), 120_000)
         let started = Date()
@@ -64,6 +79,10 @@ final class ScriptSandbox: @unchecked Sendable {
             registerBridges(ctx, st: st, box: box)
             _ = ctx.evaluateScript(Self.runtimeJS)
             if ctx.exception != nil { return }
+            if let prelude = self.preludeJS {
+                _ = ctx.evaluateScript(prelude)
+                if ctx.exception != nil { return }
+            }
             _ = ctx.evaluateScript(Self.wrap(code))
             if ctx.exception != nil { return }
         }
@@ -78,6 +97,7 @@ final class ScriptSandbox: @unchecked Sendable {
 
         let durationMs = Int(Date().timeIntervalSince(started) * 1000)
         let snap = st.snapshot()
+        let files = stateLock.withLock { writtenFiles.sorted() }
 
         if !fired || !snap.settled {
             // 超时熔断：异步释放 context（队列空闲后生效，不阻塞返回）
@@ -90,6 +110,7 @@ final class ScriptSandbox: @unchecked Sendable {
                 "error": "execution timed out after \(timeout)ms",
                 "timedOut": true,
                 "durationMs": durationMs,
+                "files": files,
             ]
         }
         if let err = snap.error {
@@ -101,6 +122,7 @@ final class ScriptSandbox: @unchecked Sendable {
                 "error": err,
                 "timedOut": false,
                 "durationMs": durationMs,
+                "files": files,
             ]
         }
         var result = snap.result ?? "null"
@@ -115,6 +137,7 @@ final class ScriptSandbox: @unchecked Sendable {
             "error": "",
             "timedOut": false,
             "durationMs": durationMs,
+            "files": files,
         ]
     }
 
@@ -145,6 +168,23 @@ final class ScriptSandbox: @unchecked Sendable {
         ctx.setObject({ [root] (path: String, content: String) -> String in
             Self.writeEnvelope(root: root, path: path, content: content)
         }, forKeyedSubscript: "__sbWrite" as NSString)
+
+        // __sbReadB64(path) -> JSON 字符串 {ok, dataBase64?} / {ok:false, error}（prelude readBytes 用）
+        ctx.setObject({ [root] (path: String) -> String in
+            Self.readB64Envelope(root: root, path: path)
+        }, forKeyedSubscript: "__sbReadB64" as NSString)
+
+        // __sbWriteB64(path, base64) -> JSON 字符串 {ok} / {ok:false, error}（prelude writeBytes 用）
+        ctx.setObject({ [weak self, root] (path: String, base64: String) -> String in
+            guard let self else { return "{\"ok\":false,\"error\":\"sandbox released\"}" }
+            switch Self.writeB64(root: root, path: path, base64: base64) {
+            case .success:
+                self.markWritten(path)
+                return "{\"ok\":true}"
+            case let .failure(err):
+                return Self.encodeEnvelope(ok: false, data: nil, error: err)
+            }
+        }, forKeyedSubscript: "__sbWriteB64" as NSString)
 
         // 结算：__sbSettle(json) / __sbSettleErr(msg)（signal 信号量）
         ctx.setObject({ (json: String) in
@@ -270,6 +310,44 @@ final class ScriptSandbox: @unchecked Sendable {
             return "{\"ok\":false,\"error\":\"encode failed\"}"
         }
         return s
+    }
+
+    private func markWritten(_ path: String) {
+        stateLock.withLock { _ = writtenFiles.insert(path) }
+    }
+
+    private static func readB64Envelope(root: URL, path: String) -> String {
+        guard let url = resolvePath(root: root, path: path) else {
+            return encodeEnvelope(ok: false, data: nil, error: "path escapes sandbox")
+        }
+        guard let data = FileManager.default.contents(atPath: url.path) else {
+            return encodeEnvelope(ok: false, data: nil, error: "read failed: \(path)")
+        }
+        if data.count > 262_144 {
+            return encodeEnvelope(ok: false, data: nil, error: "read failed: file exceeds 262144 bytes")
+        }
+        return encodeEnvelope(ok: true, data: data.base64EncodedString(), error: nil)
+    }
+
+    /// 返回给宿主侧复用：成功时调用方负责 markWritten
+    private static func writeB64(root: URL, path: String, base64: String) -> Result<Void, String> {
+        guard let url = resolvePath(root: root, path: path) else {
+            return .failure("path escapes sandbox")
+        }
+        guard let data = Data(base64Encoded: base64) else {
+            return .failure("invalid base64")
+        }
+        if data.count > 262_144 {
+            return .failure("write failed: payload exceeds 262144 bytes")
+        }
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+            return .success(())
+        } catch {
+            return .failure("write failed: \(error.localizedDescription)")
+        }
     }
 
     // MARK: - JS 源

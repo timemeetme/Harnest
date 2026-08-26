@@ -308,7 +308,7 @@ final class DeviceBridge {
                 return ["ok": false, "cancelled": true]
             }
             let name = args["name"] as? String ?? src.lastPathComponent
-            let dir = AppPaths.harnessDir.appendingPathComponent("picked", isDirectory: true)
+            let dir = ScriptSandbox.shared.sandboxRoot.appendingPathComponent("picked", isDirectory: true)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let stamp = Int(Date().timeIntervalSince1970 * 1000)
             let dest = dir.appendingPathComponent("\(stamp)_\(name)")
@@ -342,7 +342,7 @@ final class DeviceBridge {
             guard let url = await launcher.pickImage() else {
                 return ["ok": false, "cancelled": true]
             }
-            let dir = AppPaths.harnessDir.appendingPathComponent("picked", isDirectory: true)
+            let dir = ScriptSandbox.shared.sandboxRoot.appendingPathComponent("picked", isDirectory: true)
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             let stamp = Int(Date().timeIntervalSince1970 * 1000)
             let dest = dir.appendingPathComponent("\(stamp)_\(url.lastPathComponent)")
