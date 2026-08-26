@@ -30,7 +30,15 @@ final class ConfigService {
         if let data = try? Data(contentsOf: Self.file) {
             read = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         }
-        if let read = read, read["configs"] is [String: Any] {
+        if var read = read, read["configs"] is [String: Any] {
+            if (read["presetMigration"] as? String) != "2026-08b" {
+                // 存量配置一次性升级：旧预设模型列表换为官方现役列表（定制过的补齐缺失项）
+                Self.migratePresets(&read)
+                read["presetMigration"] = "2026-08b"
+                cached = read
+                saveLocked(read)
+                return read
+            }
             cached = read
             return read
         }
@@ -63,6 +71,41 @@ final class ConfigService {
         cached = cfg
         guard let data = try? JSONSerialization.data(withJSONObject: cfg, options: [.prettyPrinted, .sortedKeys]) else { return }
         try? data.write(to: Self.file, options: .atomic)
+    }
+
+    /// 预设刷新迁移（2026-08）：官方模型 ID 大面积退役后，存量配置里
+    /// 全部落在旧预设内的模型列表整体替换为新预设；定制过的列表保留用户条目，
+    /// 仅把缺失的现役预设补入（保证 kimi-k3 等新 ID 始终可选）；
+    /// defaultModel/lastModel 若已退役一并纠正。
+    private static func migratePresets(_ cfg: inout [String: Any]) {
+        guard var configs = cfg["configs"] as? [String: Any] else { return }
+        for p in Providers.all {
+            guard var item = configs[p] as? [String: Any],
+                  let legacy = Providers.legacyPresetModels[p],
+                  let meta = Providers.metaOf(p) else { continue }
+            let models = (item["models"] as? [Any])?.compactMap { $0 as? String } ?? []
+            if models.allSatisfy({ legacy.contains($0) }) {
+                item["models"] = meta.models
+            } else {
+                var merged = models
+                for m in meta.models where !merged.contains(m) {
+                    merged.append(m)
+                }
+                item["models"] = merged
+            }
+            if let def = item["defaultModel"] as? String, legacy.contains(def) {
+                item["defaultModel"] = meta.defaultModel
+            }
+            configs[p] = item
+        }
+        cfg["configs"] = configs
+        let lastProvider = cfg["lastProvider"] as? String ?? ""
+        if let legacyLast = Providers.legacyPresetModels[lastProvider],
+           let metaLast = Providers.metaOf(lastProvider),
+           let lastModel = cfg["lastModel"] as? String,
+           legacyLast.contains(lastModel) {
+            cfg["lastModel"] = metaLast.defaultModel
+        }
     }
 
     func load() -> [String: Any] {

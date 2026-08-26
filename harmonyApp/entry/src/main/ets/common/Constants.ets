@@ -163,3 +163,20 @@ export const IMPORT_ALIAS: Record<string, string> = {
 
 /** 导入时协议不兼容、直接跳过的 provider（Anthropic 原生协议，内核仅支持 OpenAI 兼容） */
 export const IMPORT_UNSUPPORTED: string[] = ['claude'];
+
+/**
+ * 2026-08 预设刷新前的旧模型列表（一次性迁移用，见 ConfigService.migratePresets）：
+ * 存量配置里模型列表未定制（全部落在旧预设内）的条目，整体替换为官方现役预设；
+ * 定制过的列表保留用户条目，仅把缺失的现役预设补入（保证 kimi-k3 等始终可选）。
+ * gemini 旧列表与新版一致，无需迁移。
+ */
+export const LEGACY_PRESET_MODELS: Record<string, string[]> = {
+  'deepseek': ['deepseek-chat', 'deepseek-reasoner'],
+  'qwen': ['qwen3-max', 'qwen-plus', 'qwen-flash', 'qwen-turbo', 'qwen3-coder-plus', 'qwq-plus'],
+  'doubao': ['doubao-seed-1.6-251015', 'doubao-seed-1.6-lite-251015', 'doubao-seed-1-6-250615',
+    'doubao-1.5-pro-32k-250115', 'doubao-1.5-thinking-pro-250415'],
+  'zhipu': ['glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.6', 'glm-4.5', 'glm-4.5-air'],
+  'zhipu_coding': ['glm-5.2', 'glm-5.1', 'glm-5', 'glm-5-turbo', 'glm-4.7', 'glm-4.6', 'glm-4.5'],
+  'moonshot': ['kimi-k2-0905-preview', 'kimi-k2-turbo-preview', 'kimi-latest'],
+  'openai': ['gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano', 'o3', 'o3-mini', 'o4-mini']
+};

@@ -84,6 +84,25 @@ object Providers {
 
     val IMPORT_UNSUPPORTED: List<String> = listOf("claude")
 
+    /**
+     * 2026-08 预设刷新前的旧模型列表（一次性迁移用，见 ConfigService.migratePresets）：
+     * 存量配置里模型列表未定制（全部落在旧预设内）的条目整体替换为官方现役预设；
+     * 定制过的列表保留用户条目，仅把缺失的现役预设补入（保证 kimi-k3 等始终可选）。
+     * gemini 旧列表与新版一致，无需迁移。
+     */
+    val LEGACY_PRESET_MODELS: Map<String, List<String>> = mapOf(
+        DEEPSEEK to listOf("deepseek-chat", "deepseek-reasoner"),
+        QWEN to listOf("qwen3-max", "qwen-plus", "qwen-flash", "qwen-turbo", "qwen3-coder-plus", "qwq-plus"),
+        DOUBAO to listOf(
+            "doubao-seed-1.6-251015", "doubao-seed-1.6-lite-251015", "doubao-seed-1-6-250615",
+            "doubao-1.5-pro-32k-250115", "doubao-1.5-thinking-pro-250415"
+        ),
+        ZHIPU to listOf("glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.6", "glm-4.5", "glm-4.5-air"),
+        ZHIPU_CODING to listOf("glm-5.2", "glm-5.1", "glm-5", "glm-5-turbo", "glm-4.7", "glm-4.6", "glm-4.5"),
+        MOONSHOT to listOf("kimi-k2-0905-preview", "kimi-k2-turbo-preview", "kimi-latest"),
+        OPENAI to listOf("gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o3", "o3-mini", "o4-mini")
+    )
+
     fun metaOf(provider: String): ProviderMeta? = META[provider]
 }
 

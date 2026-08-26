@@ -1,6 +1,6 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { StorageService } from './StorageService';
-import { AiProvider, PROVIDER_META, ALL_PROVIDERS, IMPORT_ALIAS, IMPORT_UNSUPPORTED, ReasoningEfforts } from '../common/Constants';
+import { AiProvider, PROVIDER_META, ALL_PROVIDERS, IMPORT_ALIAS, IMPORT_UNSUPPORTED, LEGACY_PRESET_MODELS, ReasoningEfforts } from '../common/Constants';
 import { ProviderProfileInput, EngineConfig, ModelInput } from './HarnessNative';
 
 const TAG = 'ConfigService';
@@ -25,6 +25,8 @@ export interface AiConfig {
   lastProvider: string;
   lastModel: string;
   lastEffort?: string;
+  /** 预设刷新迁移标记（如 '2026-08b'），防重复迁移 */
+  presetMigration?: string;
 }
 
 /** 导出格式 */
@@ -65,6 +67,15 @@ export class ConfigService {
     }
     const read = StorageService.get().readJson<AiConfig>(StorageService.get().pathApiConfig());
     if (read !== null && read.configs !== undefined) {
+      if (read.presetMigration !== '2026-08b') {
+        // 存量配置一次性升级：旧预设模型列表换为官方现役列表（定制过的补齐缺失项）
+        this.migratePresets(read);
+        read.presetMigration = '2026-08b';
+        this.config = read;
+        this.save();
+        hilog.info(DOMAIN, TAG, 'config migrated to 2026-08b presets');
+        return this.config;
+      }
       this.config = read;
       return this.config;
     }
@@ -95,6 +106,41 @@ export class ConfigService {
   save(): void {
     if (this.config !== null) {
       StorageService.get().writeJson(StorageService.get().pathApiConfig(), this.config);
+    }
+  }
+
+  /**
+   * 预设刷新迁移（2026-08）：官方模型 ID 大面积退役后，存量配置里
+   * 全部落在旧预设内的模型列表整体替换为新预设；定制过的列表保留用户条目，
+   * 仅把缺失的现役预设补入（保证 kimi-k3 等新 ID 始终可选）；
+   * defaultModel/lastModel 若已退役一并纠正。
+   */
+  private migratePresets(cfg: AiConfig): void {
+    for (const p of ALL_PROVIDERS) {
+      const item = cfg.configs[p];
+      const legacy = LEGACY_PRESET_MODELS[p];
+      const meta = PROVIDER_META[p];
+      if (item === undefined || legacy === undefined || meta === undefined) {
+        continue;
+      }
+      const untouched = item.models.every((m: string) => legacy.indexOf(m) >= 0);
+      if (untouched) {
+        item.models = meta.models.slice();
+      } else {
+        for (const m of meta.models) {
+          if (item.models.indexOf(m) < 0) {
+            item.models.push(m);
+          }
+        }
+      }
+      if (legacy.indexOf(item.defaultModel) >= 0) {
+        item.defaultModel = meta.defaultModel;
+      }
+    }
+    const legacyLast = LEGACY_PRESET_MODELS[cfg.lastProvider];
+    const metaLast = PROVIDER_META[cfg.lastProvider];
+    if (legacyLast !== undefined && metaLast !== undefined && legacyLast.indexOf(cfg.lastModel) >= 0) {
+      cfg.lastModel = metaLast.defaultModel;
     }
   }
 

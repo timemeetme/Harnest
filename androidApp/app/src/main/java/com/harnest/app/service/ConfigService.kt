@@ -40,6 +40,15 @@ class ConfigService private constructor(private val context: Context) {
             Log.e(TAG, "config read failed", e); null
         }
         if (read != null && read.has("configs")) {
+            if (read.optString("presetMigration") != "2026-08b") {
+                // 存量配置一次性升级：旧预设模型列表换为官方现役列表（定制过的补齐缺失项）
+                migratePresets(read)
+                read.put("presetMigration", "2026-08b")
+                cached = read
+                saveLocked(read)
+                Log.i(TAG, "config migrated to 2026-08b presets")
+                return read
+            }
             cached = read
             return read
         }
@@ -74,6 +83,40 @@ class ConfigService private constructor(private val context: Context) {
             file().writeText(cfg.toString(2))
         } catch (e: Throwable) {
             Log.e(TAG, "config save failed", e)
+        }
+    }
+
+    /**
+     * 预设刷新迁移（2026-08）：官方模型 ID 大面积退役后，存量配置里
+     * 全部落在旧预设内的模型列表整体替换为新预设；定制过的列表保留用户条目，
+     * 仅把缺失的现役预设补入（保证 kimi-k3 等新 ID 始终可选）；
+     * defaultModel/lastModel 若已退役一并纠正。
+     */
+    private fun migratePresets(cfg: JSONObject) {
+        val configs = cfg.optJSONObject("configs") ?: return
+        for (p in Providers.ALL) {
+            val item = configs.optJSONObject(p) ?: continue
+            val legacy = Providers.LEGACY_PRESET_MODELS[p] ?: continue
+            val meta = Providers.metaOf(p) ?: continue
+            val models = item.optJSONArray("models") ?: continue
+            val list = (0 until models.length()).mapNotNull { models.optString(it) }
+            if (list.all { legacy.contains(it) }) {
+                item.put("models", JSONArray(meta.models))
+            } else {
+                val merged = JSONArray(list)
+                for (m in meta.models) {
+                    if (!list.contains(m)) merged.put(m)
+                }
+                item.put("models", merged)
+            }
+            if (legacy.contains(item.optString("defaultModel"))) {
+                item.put("defaultModel", meta.defaultModel)
+            }
+        }
+        val legacyLast = Providers.LEGACY_PRESET_MODELS[cfg.optString("lastProvider")]
+        val metaLast = Providers.metaOf(cfg.optString("lastProvider"))
+        if (legacyLast != null && metaLast != null && legacyLast.contains(cfg.optString("lastModel"))) {
+            cfg.put("lastModel", metaLast.defaultModel)
         }
     }
 
