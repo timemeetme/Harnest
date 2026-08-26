@@ -1723,10 +1723,10 @@ var __HarnessBundle = (() => {
     }
     return abi;
   }
-  function readFileHeader(filename2, read) {
+  function readFileHeader(filename, read) {
     let fd = null;
     try {
-      let fd2 = import_node_fs2.default.openSync(filename2);
+      let fd2 = import_node_fs2.default.openSync(filename);
       let buf = Buffer.allocUnsafe(read);
       let len = import_node_fs2.default.readSync(fd2, buf);
       return buf.subarray(0, len);
@@ -1782,9 +1782,9 @@ var __HarnessBundle = (() => {
       triplets2.push(`musl_${abi}`);
     return [package_default.version, pkg2, triplets2];
   }
-  function loadDynamic(dirname5, pkg2, triplets2) {
+  function loadDynamic(dirname2, pkg2, triplets2) {
     let suffix = "/../../build/koffi";
-    let root2 = dirname5 + suffix;
+    let root2 = dirname2 + suffix;
     let roots = [root2];
     let native2 = null;
     let err = null;
@@ -20541,8 +20541,8 @@ ${caption}${tableContent}
       let inFlight;
       let removeWrapper = /* @__PURE__ */ __name(() => false, "removeWrapper");
       const waitForSetup = /* @__PURE__ */ __name(() => {
-        setupBarrier ??= new Promise((resolve5, reject) => {
-          resolveSetup = resolve5;
+        setupBarrier ??= new Promise((resolve4, reject) => {
+          resolveSetup = resolve4;
           rejectSetup = reject;
         });
         return setupBarrier;
@@ -21102,14 +21102,14 @@ ${caption}${tableContent}
   }
   __name(Inject, "Inject");
   ((Inject2) => {
-    function resolve5(inject12, result = /* @__PURE__ */ Object.create(null)) {
+    function resolve4(inject12, result = /* @__PURE__ */ Object.create(null)) {
       if (!inject12) return result;
       if (Array.isArray(inject12)) {
         for (const name13 of inject12) {
           result[name13] = null;
         }
       } else if (Reflect.has(inject12, symbols.checkProto)) {
-        Object.assign(result, resolve5(Object.getPrototypeOf(inject12)));
+        Object.assign(result, resolve4(Object.getPrototypeOf(inject12)));
         for (const name13 of Object.keys(inject12)) {
           result[name13] = inject12[name13] ?? null;
         }
@@ -21120,8 +21120,8 @@ ${caption}${tableContent}
       }
       return result;
     }
-    Inject2.resolve = resolve5;
-    __name(resolve5, "resolve");
+    Inject2.resolve = resolve4;
+    __name(resolve4, "resolve");
   })(Inject || (Inject = {}));
   var RegistryService = class {
     constructor(ctx) {
@@ -22670,8 +22670,8 @@ ${caption}${tableContent}
     });
   }
   var resolvers = {};
-  Schema.extend = /* @__PURE__ */ __name(function extend(type, resolve5) {
-    resolvers[type] = resolve5;
+  Schema.extend = /* @__PURE__ */ __name(function extend(type, resolve4) {
+    resolvers[type] = resolve4;
   }, "extend");
   Schema.resolve = /* @__PURE__ */ __name(function resolve(data, schema, options = {}, strict = false) {
     if (!schema) return [data];
@@ -23344,7 +23344,7 @@ ${caption}${tableContent}
   __name(errorChain, "errorChain");
 
   // ../../llm/llm/src/retry-policy.ts
-  var DEFAULT_MAX_RETRIES = 5;
+  var DEFAULT_MAX_RETRIES = 2;
   var DEFAULT_INITIAL_DELAY_MS = 500;
   var DEFAULT_MAX_DELAY_MS = 1e4;
   var DEFAULT_JITTER_RATIO = 0.1;
@@ -23380,12 +23380,7 @@ ${caption}${tableContent}
     "retryableCodes",
     "backoff"
   ]);
-  var ALWAYS_POLICY_KEYS = /* @__PURE__ */ new Set([
-    "mode",
-    "maxRetries",
-    "retryableCodes",
-    "backoff"
-  ]);
+  var ALWAYS_POLICY_KEYS = /* @__PURE__ */ new Set(["mode", "backoff"]);
   var BACKOFF_KEYS = /* @__PURE__ */ new Set(["initialDelayMs", "maxDelayMs", "jitterRatio"]);
   function validateKeys(value, allowed, path) {
     for (const key of Object.keys(value)) {
@@ -23532,114 +23527,6 @@ ${caption}${tableContent}
   }
   __name(harnessErrorCode, "harnessErrorCode");
 
-  // ../../llm/llm/src/content.ts
-  var OFFLOADED_IMAGE_TEXT = "[image omitted to keep the request within its image limit; older images are omitted first. If this image is still needed, read its file again when a path is available; otherwise ask the user to attach it again.]";
-  function textOnlyImageText(ref) {
-    const digest = String(ref.attachmentId).slice("sha256:".length, "sha256:".length + 8);
-    return `[image omitted because this model accepts text only; attachment sha256:${digest}]`;
-  }
-  __name(textOnlyImageText, "textOnlyImageText");
-  function requestImageHandleText(version4) {
-    return `Image ${version4.attachment.attachmentId}; request image ${version4.width}x${version4.height}px.`;
-  }
-  __name(requestImageHandleText, "requestImageHandleText");
-  function contentHasImage(content) {
-    return content.some((block) => block.type === "image" || block.type === "tool-result" && contentHasImage(block.content));
-  }
-  __name(contentHasImage, "contentHasImage");
-  function base64Length(bytes) {
-    return Math.ceil(bytes / 3) * 4;
-  }
-  __name(base64Length, "base64Length");
-  function collectImageLengths(blocks, lengths, policy) {
-    for (const block of blocks) {
-      if (block.type === "image") {
-        const bytes = policy.byteLength === void 0 ? block.attachment.bytes : policy.byteLength(block.attachment);
-        lengths.push(policy.representation === "base64" ? base64Length(bytes) : bytes);
-      } else if (block.type === "tool-result") {
-        collectImageLengths(block.content, lengths, policy);
-      }
-    }
-  }
-  __name(collectImageLengths, "collectImageLengths");
-  function replaceOldestImages(blocks, remaining) {
-    let next2;
-    for (const [index, block] of blocks.entries()) {
-      if (block.type === "image" && remaining.count > 0) {
-        remaining.count -= 1;
-        next2 ??= blocks.slice(0, index);
-        next2.push({ type: "text", text: OFFLOADED_IMAGE_TEXT });
-        continue;
-      }
-      if (block.type === "tool-result") {
-        const content = replaceOldestImages(block.content, remaining);
-        if (content !== block.content) {
-          next2 ??= blocks.slice(0, index);
-          next2.push({ ...block, content });
-          continue;
-        }
-      }
-      next2?.push(block);
-    }
-    return next2 ?? blocks;
-  }
-  __name(replaceOldestImages, "replaceOldestImages");
-  function replaceImagesForTextModel(blocks) {
-    let next2;
-    for (const [index, block] of blocks.entries()) {
-      if (block.type === "image") {
-        next2 ??= blocks.slice(0, index);
-        next2.push({ type: "text", text: textOnlyImageText(block.attachment) });
-        continue;
-      }
-      if (block.type === "tool-result") {
-        const content = replaceImagesForTextModel(block.content);
-        if (content !== block.content) {
-          next2 ??= blocks.slice(0, index);
-          next2.push({ ...block, content });
-          continue;
-        }
-      }
-      next2?.push(block);
-    }
-    return next2 ?? blocks;
-  }
-  __name(replaceImagesForTextModel, "replaceImagesForTextModel");
-  function projectImagesForTextModel(messages) {
-    if (!messages.some((message) => contentHasImage(message.content))) return messages;
-    return messages.map((message) => {
-      const content = replaceImagesForTextModel(message.content);
-      return content === message.content ? message : { ...message, content };
-    });
-  }
-  __name(projectImagesForTextModel, "projectImagesForTextModel");
-  function offloadRequestImagesWithPolicy(messages, policy) {
-    const lengths = [];
-    for (const message of messages) collectImageLengths(message.content, lengths, policy);
-    const total = lengths.reduce((sum, bytes) => sum + bytes, 0);
-    const excessCount = policy.maxImages === void 0 ? 0 : Math.max(0, lengths.length - policy.maxImages);
-    const excessBytes = policy.maxBytes === void 0 ? 0 : Math.max(0, total - policy.maxBytes);
-    if (excessCount === 0 && excessBytes === 0) return messages;
-    const countQuantum = policy.countQuantum ?? 1;
-    const byteQuantum = policy.byteQuantum ?? 1;
-    const removeCount = excessCount === 0 ? 0 : Math.ceil(excessCount / countQuantum) * countQuantum;
-    const removeBytes = excessBytes === 0 ? 0 : Math.ceil(excessBytes / byteQuantum) * byteQuantum;
-    let count = 0;
-    let removedBytes = 0;
-    for (const imageBytes of lengths) {
-      const byteTargetMet = removeBytes === 0 || (byteQuantum === 1 ? removedBytes >= removeBytes : removedBytes > removeBytes);
-      if (count >= removeCount && byteTargetMet) break;
-      removedBytes += imageBytes;
-      count += 1;
-    }
-    const remaining = { count };
-    return messages.map((message) => {
-      const content = replaceOldestImages(message.content, remaining);
-      return content === message.content ? message : { ...message, content };
-    });
-  }
-  __name(offloadRequestImagesWithPolicy, "offloadRequestImagesWithPolicy");
-
   // ../../llm/llm/src/attribution.ts
   var import_node_module = __require("node:module");
   var import_meta = {};
@@ -23665,6 +23552,12 @@ ${caption}${tableContent}
   }
   __name(assertNever, "assertNever");
 
+  // ../../llm/llm/src/content.ts
+  function contentHasImage(content) {
+    return content.some((block) => block.type === "image" || block.type === "tool-result" && contentHasImage(block.content));
+  }
+  __name(contentHasImage, "contentHasImage");
+
   // ../../llm/llm/src/assembler.ts
   var BlockAssembler = class {
     static {
@@ -23674,7 +23567,7 @@ ${caption}${tableContent}
     order = [];
     _usage;
     _finish;
-    _replayState;
+    _replayState = void 0;
     /**
      * Feed one chunk into the assembly state.
      * @param chunk - the next raw chunk, in stream order.
@@ -23760,45 +23653,14 @@ ${caption}${tableContent}
       return partial2;
     }
     /**
-     * The one shared keep/drop decision over all seen blocks: max-token
-     * truncation drops tool calls that cannot be executed safely. Emitted blocks
-     * and replay metadata both derive from this result, so they cannot disagree.
-     */
-    assembled() {
-      const all = this.order.map((index) => this.assemble(this.mustGet(index), index));
-      const kept = this.finish.kind === "max-tokens" ? all.map((block) => block.type !== "tool-call") : void 0;
-      const blocks = kept === void 0 ? all : all.filter((_, position) => kept[position]);
-      const envelope = this._replayState;
-      if (envelope?.blocks === void 0) return { blocks, replay: envelope };
-      if (envelope.blocks.length !== all.length) return { blocks, replay: void 0 };
-      return {
-        blocks,
-        replay: kept === void 0 || blocks.length === all.length ? envelope : { response: envelope.response, blocks: envelope.blocks.filter((_, position) => kept[position]) }
-      };
-    }
-    /**
      * Assemble all blocks seen so far, in stream order.
      * @returns one block per seen index, except that max-token truncation drops
      *   tool calls that cannot be executed safely; an open block assembles from
      *   its accumulated deltas (an unknown block type never closed by `block-end` throws).
      */
     blocks() {
-      return this.assembled().blocks;
-    }
-    /**
-     * Assemble the prefix an interrupted stream can safely finalize: closed and
-     * open text/reasoning blocks with non-whitespace content, in stream order.
-     * Tool calls are omitted because interruption precedes dispatch; retaining
-     * one would require a fabricated result. Open unknown blocks are also omitted.
-     * @returns the kept blocks; empty when nothing streamed before the interruption.
-     */
-    interruptedBlocks() {
-      return this.order.map((index) => {
-        const partial2 = this.mustGet(index);
-        const type = partial2.block?.type ?? partial2.blockType;
-        if (type !== "text" && type !== "reasoning") return void 0;
-        return this.assemble(partial2, index);
-      }).filter((block) => (block?.type === "text" || block?.type === "reasoning") && block.text.trim() !== "");
+      const blocks = this.order.map((index) => this.assemble(this.mustGet(index), index));
+      return this.finish.kind === "max-tokens" ? blocks.filter((block) => block.type !== "tool-call") : blocks;
     }
     /** Usage from the `usage` chunk; undefined until one arrives. */
     get usage() {
@@ -23808,13 +23670,9 @@ ${caption}${tableContent}
     get finish() {
       return this._finish ?? { kind: "stop" };
     }
-    /**
-     * Replay metadata from the terminal finish chunk, if any, with per-block
-     * entries pruned in step with {@link blocks}. Undefined when the envelope's
-     * entries do not align with the emitted blocks.
-     */
+    /** Adapter-private replay state from the terminal finish chunk, if any. */
     get replayState() {
-      return this.assembled().replay;
+      return this._replayState;
     }
     /**
      * The assembled assistant message.
@@ -23902,21 +23760,6 @@ ${caption}${tableContent}
      */
     resolveModel(provider, model, _signal) {
       return Promise.resolve({ provider, id: model, name: model });
-    }
-    /**
-     * Bind exact model metadata and the eventual request dispatch to one adapter generation.
-     * Dynamic adapters override this so settings changes between preparation and
-     * dispatch cannot combine one generation's capabilities with another's endpoint.
-     * @param provider - registered provider route.
-     * @param model - exact model id.
-     * @param signal - cancellation for model resolution.
-     * @returns model metadata and a one-generation stream entry point.
-     */
-    async prepareCall(provider, model, signal) {
-      return {
-        model: await this.resolveModel(provider, model, signal),
-        stream: /* @__PURE__ */ __name((options) => this.stream(options), "stream")
-      };
     }
   };
   var LlmRuntime = class extends Service {
@@ -24201,12 +24044,8 @@ ${caption}${tableContent}
       return this.resolveModelInfoFor(this.registration(provider), model, signal);
     }
     async resolveModelInfoFor(registration, model, signal) {
-      const resolved = await registration.adapter.resolveModel(registration.provider.id, model, signal);
-      return this.normalizeModelInfo(registration, model, resolved);
-    }
-    /** Validate and detach one adapter-returned exact model result. */
-    normalizeModelInfo(registration, model, resolved) {
       const provider = registration.provider.id;
+      const resolved = await registration.adapter.resolveModel(provider, model, signal);
       if (typeof resolved.provider !== "string" || resolved.provider !== provider || typeof resolved.id !== "string" || resolved.id !== model || typeof resolved.name !== "string" || resolved.name.length === 0 || resolved.description !== void 0 && typeof resolved.description !== "string") {
         throw new LlmError(
           `adapter returned invalid exact model metadata for provider "${provider}" model "${model}"`,
@@ -24289,10 +24128,6 @@ ${caption}${tableContent}
     }
     async resolveCallFor(registration, config2, signal) {
       const info = await this.resolveModelInfoFor(registration, config2.model, signal);
-      return this.resolveCallWithInfo(config2, info);
-    }
-    /** Validate request controls against one already-bound exact model result. */
-    resolveCallWithInfo(config2, info) {
       const defaulted = config2.maxTokens === void 0 && info.defaultMaxTokens !== void 0 ? { ...config2, maxTokens: info.defaultMaxTokens } : config2;
       const reasoning = info.reasoning;
       const requested = defaulted.reasoningEffort;
@@ -24318,8 +24153,7 @@ ${caption}${tableContent}
       }
       return {
         config: resolvedConfig,
-        ...info.context === void 0 ? {} : { context: info.context },
-        modelInfo: info
+        ...info.context === void 0 ? {} : { context: info.context }
       };
     }
     /**
@@ -24332,9 +24166,7 @@ ${caption}${tableContent}
      */
     async prepareCall(config2, signal) {
       const registration = this.registration(config2.provider);
-      const adapterCall = await registration.adapter.prepareCall(config2.provider, config2.model, signal);
-      const modelInfo2 = this.normalizeModelInfo(registration, config2.model, adapterCall.model);
-      const resolved = this.resolveCallWithInfo(config2, modelInfo2);
+      const resolved = await this.resolveCallFor(registration, config2, signal);
       const resolvedConfig = deepFreeze(structuredClone(resolved.config));
       const context = resolved.context === void 0 ? void 0 : deepFreeze(structuredClone(resolved.context));
       const adapterDefaults = deepFreeze({
@@ -24347,7 +24179,6 @@ ${caption}${tableContent}
         retryPolicy: registration.retryPolicy,
         adapterDefaults,
         ...context === void 0 ? {} : { context },
-        ...modelInfo2.inputModalities === void 0 ? {} : { inputModalities: Object.freeze([...modelInfo2.inputModalities]) },
         stream: /* @__PURE__ */ __name((options) => {
           if (dispatched) {
             throw new LlmError("a prepared LLM call can only be dispatched once", "INVALID_PREPARED_CALL");
@@ -24359,12 +24190,7 @@ ${caption}${tableContent}
             );
           }
           dispatched = true;
-          return this.streamWithRegistration(options, {
-            registration,
-            config: resolvedConfig,
-            modelInfo: modelInfo2,
-            dispatch: /* @__PURE__ */ __name((options2) => adapterCall.stream(options2), "dispatch")
-          });
+          return this.streamWithRegistration(options, { registration, config: resolvedConfig });
         }, "stream")
       });
     }
@@ -24397,20 +24223,7 @@ ${caption}${tableContent}
       let iterator;
       try {
         const registration = prepared?.registration ?? this.registration(options.provider);
-        const adapter = registration.adapter;
-        let modelInfo2;
-        let resolvedConfig;
-        let dispatch;
-        if (prepared === void 0) {
-          const adapterCall = await adapter.prepareCall(options.provider, options.model, options.signal);
-          modelInfo2 = this.normalizeModelInfo(registration, options.model, adapterCall.model);
-          resolvedConfig = this.resolveCallWithInfo(options, modelInfo2).config;
-          dispatch = /* @__PURE__ */ __name((options2) => adapterCall.stream(options2), "dispatch");
-        } else {
-          modelInfo2 = prepared.modelInfo;
-          resolvedConfig = prepared.config;
-          dispatch = prepared.dispatch;
-        }
+        const resolvedConfig = prepared === void 0 ? (await this.resolveCallFor(registration, options, options.signal)).config : prepared.config;
         if (prepared !== void 0 && !callConfigEquals(options, resolvedConfig)) {
           throw new LlmError(
             "prepared LLM call config changed before adapter dispatch",
@@ -24418,8 +24231,8 @@ ${caption}${tableContent}
           );
         }
         const resolvedOptions = callConfigEquals(options, resolvedConfig) ? options : Object.isFrozen(options) ? deepFreeze({ ...options, ...resolvedConfig }) : { ...options, ...resolvedConfig };
-        const projectedOptions = modelInfo2.inputModalities !== void 0 && !modelInfo2.inputModalities.includes("image") && resolvedOptions.messages.some((message) => contentHasImage(message.content)) ? Object.isFrozen(resolvedOptions) ? deepFreeze({ ...resolvedOptions, messages: projectImagesForTextModel(resolvedOptions.messages) }) : { ...resolvedOptions, messages: projectImagesForTextModel(resolvedOptions.messages) } : resolvedOptions;
-        const stream = dispatch(this.forAdapter(projectedOptions, adapter));
+        const adapter = registration.adapter;
+        const stream = adapter.stream(this.forAdapter(resolvedOptions, adapter));
         iterator = stream[Symbol.asyncIterator]();
       } catch (error51) {
         yield adapterFailureChunk(error51, options.signal);
@@ -27503,11 +27316,11 @@ ${body}`;
   var RUN_CODE_NAME = "run_code";
   var SDK_SECTION_ORDER = 150;
   var TYPESCRIPT_FLAVOR = {
-    description: "Execute a TypeScript program against the available tools. Takes two required arguments: `code`, the BODY of an async function (erasable syntax only; top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Only what you print or return is program output \u2014 curate it. Image-bearing subtool results are attached after the run.",
+    description: "Execute a TypeScript program against the available tools. Takes two required arguments: `code`, the BODY of an async function (erasable syntax only; top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Only what you print or return comes back \u2014 curate it.",
     codeDescription: "The program: the body of an async TypeScript function."
   };
   var PYTHON_FLAVOR = {
-    description: "Execute a Python program against the available tools. Takes two required arguments: `code`, the BODY of an async function (top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Use `print(...)` and/or `return <value>` for program output \u2014 curate it. Image-bearing subtool results are attached after the run.",
+    description: "Execute a Python program against the available tools. Takes two required arguments: `code`, the BODY of an async function (top-level `await` and `return` work), and `description`, a short summary of what the program does. Call tools as `await tools.name(args)` per the declarations in the system prompt. Answer with `print(...)` and/or `return <value>` \u2014 only that comes back, so curate it.",
     codeDescription: "The program: the body of an async Python function."
   };
   var RUN_CODE_FLAVORS = {
@@ -27685,8 +27498,8 @@ ${JSON_INDENT.repeat(task.depth)}}` });
           driverRun = (async () => {
             try {
               for (; ; ) {
-                const signal = new Promise((resolve5) => {
-                  wake = resolve5;
+                const signal = new Promise((resolve4) => {
+                  wake = resolve4;
                 });
                 const commitHead = commitQueue[0];
                 if (commitHead !== void 0 && commitHead.settled) {
@@ -27750,10 +27563,10 @@ ${JSON_INDENT.repeat(task.depth)}}` });
             signal: runController.signal
           };
           const scheduler = registry2[TOOL_RUNTIME_SCHEDULER];
-          const outcome = await new Promise((resolve5, reject) => {
+          const outcome = await new Promise((resolve4, reject) => {
             let parked;
             const settle = /* @__PURE__ */ __name((result) => {
-              resolve5(result.isError ? { isError: true, message: result.error.message } : { isError: false, value: result.value });
+              resolve4(result.isError ? { isError: true, message: result.error.message } : { isError: false, value: result.value });
               const agent = exec.agent;
               if (agent === void 0) return;
               const task = (async () => {
@@ -27816,12 +27629,6 @@ ${JSON_INDENT.repeat(task.depth)}}` });
               async commit() {
                 if (parked === void 0) return;
                 const result = parked.kind === "post-result" ? await scheduler.finalize(parked.exec, parked.result) : scheduler.finish(parked.exec, parked.result);
-                if (!result.isError && result.content.some((block) => block.type === "image")) {
-                  exec.deferContext(createUserMessage({
-                    content: result.content,
-                    source: { kind: "plugin", plugin: "tools-code-mode" }
-                  }));
-                }
                 for (const context of result.additionalContexts ?? []) {
                   exec.deferContext(context);
                 }
@@ -28085,7 +27892,7 @@ ${result.logs.join("\n")}` : "";
 - Call tools as \`await tools.name(args)\` \u2014 quoted access for exotic names: \`tools["my-tool"](args)\`. Every call resolves to the tool's typed canonical JSON value. Tool arguments must be lossless JSON.
 - A FAILED tool call rejects with \`ToolCallError\`, whose \`toolName\` identifies the failed tool and whose \`message\` is human-readable \u2014 \`try/catch\` it to handle and continue.
 - Independent read-only calls MAY overlap under \`Promise.all\` (safe calls run concurrently; mutating calls run alone, in submission order). Sequence dependent work with \`await\`.
-- Emit results with \`return\` and/or \`console.log(...)\`. Only what you print or return is program output. A successful tool result containing an image is attached after the run so you can inspect it on the next step; every other intermediate result stays out of the conversation, so extract just what you need.
+- Emit results with \`return\` and/or \`console.log(...)\`. ONLY what you print or return comes back to you \u2014 intermediate tool results never enter the conversation, so extract just what you need.
 
 The available tools:`;
   function renderToolsSdk(schemas) {
@@ -28387,7 +28194,7 @@ ${declaration}
 - Call tools as \`await tools.name(args)\` \u2014 subscript access for exotic, reserved, or underscore-leading names: \`await tools["my-tool"](args)\`. Every call resolves to the tool's typed canonical JSON value (each method's return type below). Tool arguments must be lossless JSON.
 - A FAILED tool call raises \`ToolCallError\`, whose \`toolName\` identifies the failed tool and whose message is human-readable \u2014 wrap in \`try/except\` to handle and continue.
 - Independent read-only calls MAY overlap under \`asyncio.gather\` (safe calls run concurrently; mutating calls run alone, in submission order). Sequence dependent work with \`await\`.
-- Emit the run's answer with \`print(...)\` and/or a top-level \`return <value>\`; the returned value must be lossless JSON. Only what you print and return is program output. A successful tool result containing an image is attached after the run so you can inspect it on the next step; every other intermediate result stays out of the conversation, so extract just what you need.
+- Emit the run's answer with \`print(...)\` and/or a top-level \`return <value>\`; the returned value must be lossless JSON. ONLY what you print and the returned value come back \u2014 intermediate tool results never enter the conversation, so extract just what you need.
 
 The available tools:`;
   function renderToolsSdkPy(schemas) {
@@ -30084,9 +29891,10 @@ ${declaration}
           turnEnds = { kind: "aborted", reason: signal.reason };
           throw error51;
         }
+        const chain = errorChain(error51);
         turnEnds = {
           kind: "error",
-          error: error51 instanceof LlmError ? error51.failure : { message: errorChain(error51), code: "UNKNOWN" }
+          error: error51 instanceof LlmError ? { ...error51.failure, ...chain === error51.failure.message ? {} : { detail: chain } } : { message: chain, code: "UNKNOWN" }
         };
         this.throwError(error51);
       } finally {
@@ -30118,33 +29926,14 @@ ${declaration}
         );
         const assembler = new BlockAssembler();
         const chunkSeqs = [];
-        try {
-          const stream = preparedCall?.stream(request) ?? this.loopCtx.llm.stream(request);
+        const stream = preparedCall?.stream(request) ?? this.loopCtx.llm.stream(request);
+        signal.throwIfAborted();
+        for await (const chunk of stream) {
           signal.throwIfAborted();
-          for await (const chunk of stream) {
-            signal.throwIfAborted();
-            chunkSeqs.push(this.session.append("assistant/chunk", { turn, step, chunk }).seq);
-            assembler.push(chunk);
-          }
-          signal.throwIfAborted();
-        } catch (error51) {
-          if (signal.aborted) {
-            const content = assembler.interruptedBlocks();
-            if (content.length > 0) {
-              this.session.append("assistant/message", {
-                turn,
-                step,
-                message: createAssistantMessage({
-                  content,
-                  source: { provider: request.provider, model: request.model }
-                }),
-                interrupted: true,
-                ...assembler.usage === void 0 ? {} : { usage: assembler.usage }
-              }, { surfaceOp: "append", sourceEventSeqs: chunkSeqs });
-            }
-          }
-          throw error51;
+          chunkSeqs.push(this.session.append("assistant/chunk", { turn, step, chunk }).seq);
+          assembler.push(chunk);
         }
+        signal.throwIfAborted();
         const finish2 = assembler.finish;
         if (finish2.kind === "error" || finish2.kind === "aborted") {
           const action = await this.dispatch.waterfall(
@@ -45880,13 +45669,12 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
         this.work.clear();
       }, "sessionTitle lifecycle");
       ctx.inject(["sessionProjections"], (projectionCtx) => {
-        const titleSchema = external_exports.union([external_exports.string().min(1), external_exports.null()]);
         projectionCtx.sessionProjections.register({
           key: "title",
-          stateSchema: titleSchema,
+          schema: external_exports.union([external_exports.string().min(1), external_exports.null()]),
           init: /* @__PURE__ */ __name(() => null, "init"),
           apply: /* @__PURE__ */ __name((state, event) => event.type === "session/title" ? event.data.title : state, "apply"),
-          wire: { viewSchema: titleSchema, view: /* @__PURE__ */ __name((state) => state, "view") },
+          view: /* @__PURE__ */ __name((state) => state, "view"),
           stateVersion: 1
         });
       });
@@ -46573,26 +46361,14 @@ ${JSON.stringify(messages)}`;
   __name(foldSurfaceProjection, "foldSurfaceProjection");
 
   // ../../llm/token-meter/src/breakdown-projection.ts
-  var tokenCount = external_exports.number().int().nonnegative();
-  var contextBreakdownStateSchema = external_exports.object({
-    systemTokens: tokenCount,
-    toolsTokens: tokenCount,
-    messageTokens: tokenCount,
-    claim: external_exports.object({
-      start: tokenCount,
-      end: tokenCount,
-      tokens: tokenCount
-    }).optional()
-  }).strict();
   var breakdownSchema = external_exports.object({
-    systemTokens: tokenCount,
-    toolsTokens: tokenCount,
-    messageTokens: tokenCount
+    systemTokens: external_exports.number().int().nonnegative(),
+    toolsTokens: external_exports.number().int().nonnegative(),
+    messageTokens: external_exports.number().int().nonnegative()
   }).strict();
   var contextBreakdownProjectionDefinition = {
     key: "contextBreakdown",
-    stateVersion: 2,
-    stateSchema: contextBreakdownStateSchema,
+    schema: breakdownSchema,
     init: /* @__PURE__ */ __name(() => ({ systemTokens: 0, toolsTokens: 0, messageTokens: 0 }), "init"),
     apply: /* @__PURE__ */ __name((state, event) => {
       const fold = foldSurfaceProjection(state.claim, event);
@@ -46611,10 +46387,8 @@ ${JSON.stringify(messages)}`;
         ...fold.claim === void 0 ? {} : { claim: fold.claim }
       };
     }, "apply"),
-    wire: {
-      viewSchema: breakdownSchema,
-      view: /* @__PURE__ */ __name(({ systemTokens, toolsTokens, messageTokens }) => ({ systemTokens, toolsTokens, messageTokens }), "view")
-    }
+    view: /* @__PURE__ */ __name(({ systemTokens, toolsTokens, messageTokens }) => ({ systemTokens, toolsTokens, messageTokens }), "view"),
+    stateVersion: 2
   };
 
   // ../../llm/token-meter/src/usage-projection.ts
@@ -46643,40 +46417,16 @@ ${JSON.stringify(messages)}`;
     cacheReadTokens: external_exports.number().int().nonnegative(),
     cacheWriteTokens: external_exports.number().int().nonnegative()
   }).strict();
-  var tokenUsageStateSchema = external_exports.object({
-    totals: projectionSchema,
-    last: external_exports.object({
-      turn: external_exports.number().int().nonnegative(),
-      step: external_exports.number().int().nonnegative(),
-      buckets: projectionSchema
-    }).nullable()
-  }).strict();
   var pressureSchema = external_exports.object({
     pressureTokens: external_exports.number().int().nonnegative().optional(),
     projectedTokens: external_exports.number().int().nonnegative().optional(),
     contextWindow: external_exports.number().int().positive().optional()
-  }).strict().transform(({ pressureTokens, projectedTokens, contextWindow }) => ({
-    ...pressureTokens === void 0 ? {} : { pressureTokens },
-    ...projectedTokens === void 0 ? {} : { projectedTokens },
-    ...contextWindow === void 0 ? {} : { contextWindow }
-  }));
+  }).strict();
   var pressureFrom = /* @__PURE__ */ __name((usage) => usage.inputTokens + (usage.cacheReadTokens ?? 0) + (usage.cacheWriteTokens ?? 0), "pressureFrom");
   var usageOf = /* @__PURE__ */ __name((event) => event.type === "assistant/chunk" && event.data.chunk.type === "usage" ? event.data.chunk.usage : event.type === "assistant/message" ? event.data.usage : void 0, "usageOf");
-  var contextPressureStateSchema = external_exports.object({
-    contextWindow: external_exports.number().int().positive().optional(),
-    pressureTokens: external_exports.number().int().nonnegative().optional(),
-    surfaceTokens: external_exports.number().int().nonnegative(),
-    sampledSurfaceTokens: external_exports.number().int().nonnegative().optional(),
-    claim: external_exports.object({
-      start: external_exports.number().int().nonnegative(),
-      end: external_exports.number().int().nonnegative(),
-      tokens: external_exports.number().int().nonnegative()
-    }).optional()
-  }).strict();
   var tokenUsageProjectionDefinition = {
     key: "tokenUsage",
-    stateVersion: 1,
-    stateSchema: tokenUsageStateSchema,
+    schema: projectionSchema,
     init: /* @__PURE__ */ __name(() => ({ totals: zeroBuckets(), last: null }), "init"),
     apply: /* @__PURE__ */ __name((state, event) => {
       let turn;
@@ -46700,12 +46450,12 @@ ${JSON.stringify(messages)}`;
         last: { turn, step, buckets }
       };
     }, "apply"),
-    wire: { viewSchema: projectionSchema, view: /* @__PURE__ */ __name((state) => state.totals, "view") }
+    view: /* @__PURE__ */ __name((state) => state.totals, "view"),
+    stateVersion: 1
   };
   var contextPressureProjectionDefinition = {
     key: "contextPressure",
-    stateVersion: 4,
-    stateSchema: contextPressureStateSchema,
+    schema: pressureSchema,
     init: /* @__PURE__ */ __name(() => ({ surfaceTokens: 0 }), "init"),
     apply: /* @__PURE__ */ __name((state, event) => {
       const fold = foldSurfaceProjection(state.claim, event);
@@ -46735,14 +46485,12 @@ ${JSON.stringify(messages)}`;
       const { claim: _expired, ...withoutClaim } = next2;
       return fold.claim === void 0 ? withoutClaim : { ...withoutClaim, claim: fold.claim };
     }, "apply"),
-    wire: {
-      viewSchema: pressureSchema,
-      view: /* @__PURE__ */ __name(({ contextWindow, pressureTokens, surfaceTokens, sampledSurfaceTokens }) => ({
-        ...contextWindow === void 0 ? {} : { contextWindow },
-        ...pressureTokens === void 0 ? {} : { pressureTokens },
-        ...pressureTokens === void 0 || sampledSurfaceTokens === void 0 ? {} : { projectedTokens: Math.max(0, pressureTokens + surfaceTokens - sampledSurfaceTokens) }
-      }), "view")
-    }
+    view: /* @__PURE__ */ __name(({ contextWindow, pressureTokens, surfaceTokens, sampledSurfaceTokens }) => ({
+      ...contextWindow === void 0 ? {} : { contextWindow },
+      ...pressureTokens === void 0 ? {} : { pressureTokens },
+      ...pressureTokens === void 0 || sampledSurfaceTokens === void 0 ? {} : { projectedTokens: Math.max(0, pressureTokens + surfaceTokens - sampledSurfaceTokens) }
+    }), "view"),
+    stateVersion: 4
   };
 
   // ../../llm/token-meter/src/surface-fold.ts
@@ -48181,8 +47929,8 @@ ${SUMMARY_OPEN_TAG}` },
       this.counters.set(spec.kind, count);
       const id = JobId(`${spec.kind}-${count}`);
       let markSettled;
-      const settled = new Promise((resolve5) => {
-        markSettled = resolve5;
+      const settled = new Promise((resolve4) => {
+        markSettled = resolve4;
       });
       const job = {
         id,
@@ -48264,16 +48012,16 @@ ${SUMMARY_OPEN_TAG}` },
           var _stack = [];
           try {
             const d = __using(_stack, deadline(signal, timeoutMs, TASK_WAIT_TIMEOUT));
-            await new Promise((resolve5, reject) => {
+            await new Promise((resolve4, reject) => {
               const onSettled = /* @__PURE__ */ __name(() => {
                 job.waitResolvers.delete(onSettled);
                 d.signal.removeEventListener("abort", onAbort);
-                resolve5();
+                resolve4();
               }, "onSettled");
               const onAbort = /* @__PURE__ */ __name(() => {
                 job.waitResolvers.delete(onSettled);
                 if (timeoutOf(d.signal, TASK_WAIT_TIMEOUT) !== void 0) {
-                  resolve5();
+                  resolve4();
                 } else {
                   uncount();
                   reject(new Error("wait aborted"));
@@ -48566,14 +48314,14 @@ ${SUMMARY_OPEN_TAG}` },
     ctx.inject(["sessionProjections"], (projectionCtx) => {
       projectionCtx.sessionProjections.register({
         key: "todos",
-        stateSchema: todosProjectionSchema,
+        schema: todosProjectionSchema,
         init: /* @__PURE__ */ __name(() => null, "init"),
         apply: /* @__PURE__ */ __name((state, event) => {
           if (event.type === "todo/write") return event.data.todos;
           if (event.type === "turn/start") return null;
           return state;
         }, "apply"),
-        wire: { viewSchema: todosProjectionSchema, view: /* @__PURE__ */ __name((state) => state, "view") },
+        view: /* @__PURE__ */ __name((state) => state, "view"),
         stateVersion: 2
       });
     });
@@ -50468,19 +50216,13 @@ ${verb} file
   // ../../fs/tool-fs/src/read-image.ts
   var import_node_path5 = __require("node:path");
 
+  // ../../attachment/attachment/src/brand.ts
+  function AttachmentId(value) {
+    return value;
+  }
+  __name(AttachmentId, "AttachmentId");
+
   // ../../attachment/attachment/src/error.ts
-  var IMAGE_ADMISSION_ERROR_CODES = [
-    "TOO_MANY_IMAGES",
-    "IMAGES_TOO_LARGE",
-    "UNSUPPORTED_IMAGE_TYPE",
-    "INVALID_IMAGE_BASE64",
-    "INVALID_IMAGE",
-    "IMAGE_TYPE_MISMATCH",
-    "IMAGE_TOO_LARGE",
-    "IMAGE_TOO_MANY_PIXELS",
-    "IMAGE_DIMENSION_TOO_LARGE"
-  ];
-  var IMAGE_ADMISSION_ERROR_CODE_SET = new Set(IMAGE_ADMISSION_ERROR_CODES);
   var AttachmentError = class extends Error {
     static {
       __name(this, "AttachmentError");
@@ -50499,16 +50241,6 @@ ${verb} file
     }
   };
 
-  // ../../attachment/attachment/src/brand.ts
-  function AttachmentId(value) {
-    return value;
-  }
-  __name(AttachmentId, "AttachmentId");
-  function ImageVariantId(value) {
-    return value;
-  }
-  __name(ImageVariantId, "ImageVariantId");
-
   // ../../fs/tool-fs/src/read-image.ts
   var IMAGE_EXTENSIONS = {
     ".png": "image/png",
@@ -50516,27 +50248,6 @@ ${verb} file
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
     ".gif": "image/gif"
-  };
-  var IMAGE_VALUE_SCHEMA = {
-    type: "object",
-    additionalProperties: false,
-    required: true,
-    properties: {
-      attachmentId: { type: "string", required: true },
-      mediaType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"], required: true },
-      bytes: { type: "integer", required: true },
-      width: { type: "integer", required: true },
-      height: { type: "integer", required: true },
-      name: { type: "string" },
-      originalDimensions: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          width: { type: "integer", required: true },
-          height: { type: "integer", required: true }
-        }
-      }
-    }
   };
   function imageMediaTypeForPath(filePath) {
     return IMAGE_EXTENSIONS[(0, import_node_path5.extname)(filePath).toLowerCase()];
@@ -50563,25 +50274,15 @@ ${verb} file
       bytes: image.bytes,
       width: image.width,
       height: image.height,
-      ...image.name === void 0 ? {} : { name: image.name },
-      ...image.originalDimensions === void 0 ? {} : {
-        originalDimensions: { ...image.originalDimensions }
-      }
+      ...image.name === void 0 ? {} : { name: image.name }
     };
   }
   __name(imageRefFromValue, "imageRefFromValue");
   function formatImageReadOutput(displayPath, image) {
-    let scaled = "";
-    if (image.originalDimensions !== void 0) {
-      const x = (image.originalDimensions.width / image.width).toFixed(2);
-      const y = (image.originalDimensions.height / image.height).toFixed(2);
-      const advice = x === y ? `multiply coordinates by ${x}` : `multiply x coordinates by ${x} and y coordinates by ${y}`;
-      scaled = ` (downscaled from ${image.originalDimensions.width}x${image.originalDimensions.height} px; ${advice} to locate features in the original file)`;
-    }
     return `<path>${displayPath}</path>
 <type>image</type>
 <content>
-${image.mediaType} image, ${image.width}x${image.height} px, ${image.bytes} bytes${scaled}
+${image.mediaType} image, ${image.width}x${image.height} px, ${image.bytes} bytes
 </content>`;
   }
   __name(formatImageReadOutput, "formatImageReadOutput");
@@ -50595,7 +50296,7 @@ ${image.mediaType} image, ${image.width}x${image.height} px, ${image.bytes} byte
   function applyReadImageTool(ctx) {
     ctx.tools.register(defineTool({
       name: "read_image",
-      description: "Read a PNG/JPEG/WebP/GIF file and return the image itself. Harness validates and downscales large supported images before the next model request, so use this tool directly instead of installing image libraries or creating thumbnails merely to inspect an image. Independent files may be read concurrently in small batches. Requires the current model to accept image input.",
+      description: "Read a PNG/JPEG/WebP/GIF file and return the image itself. Requires the current model to accept image input.",
       parameters: {
         file_path: { type: "string", required: true, description: "Path to the image file, resolved by the filesystem backend." }
       },
@@ -50605,7 +50306,19 @@ ${image.mediaType} image, ${image.width}x${image.height} px, ${image.bytes} byte
           additionalProperties: false,
           properties: {
             path: { type: "string", required: true },
-            image: IMAGE_VALUE_SCHEMA
+            image: {
+              type: "object",
+              additionalProperties: false,
+              required: true,
+              properties: {
+                attachmentId: { type: "string", required: true },
+                mediaType: { type: "string", enum: ["image/png", "image/jpeg", "image/webp", "image/gif"], required: true },
+                bytes: { type: "integer", required: true },
+                width: { type: "integer", required: true },
+                height: { type: "integer", required: true },
+                name: { type: "string" }
+              }
+            }
           }
         },
         render: /* @__PURE__ */ __name((_args, value) => imageReadContent(value), "render")
@@ -50634,35 +50347,10 @@ ${image.mediaType} image, ${image.width}x${image.height} px, ${image.bytes} byte
         try {
           ref = await attachments2.saveImage({ data, mediaType, name: (0, import_node_path5.basename)(target.displayPath) });
         } catch (error51) {
-          if (!(error51 instanceof AttachmentError)) throw error51;
-          if (error51.code === "IMAGE_DIMENSION_TOO_LARGE") {
-            throw new Error(
-              `cannot read "${target.displayPath}": at least one image side exceeds the ${attachments2.imageLimits.maxImageDimension}px limit; downscale the image and read the smaller copy`,
-              { cause: error51 }
-            );
-          }
-          if (error51.code === "IMAGE_TOO_MANY_PIXELS") {
-            throw new Error(
-              `cannot read "${target.displayPath}": the image exceeds the ${attachments2.imageLimits.maxImagePixels}-pixel decoded-size limit; downscale the image and read the smaller copy`,
-              { cause: error51 }
-            );
-          }
-          if (error51.code === "IMAGE_TOO_LARGE") {
-            throw new Error(
-              `cannot read "${target.displayPath}": the image cannot be stored within the deployment's byte limits; downscale the image and read the smaller copy`,
-              { cause: error51 }
-            );
-          }
-          if (error51.code === "ATTACHMENT_WRITE_FAILED" && /16-bit PNG/iu.test(error51.message)) {
-            throw new Error(
-              `cannot read "${target.displayPath}": the 16-bit PNG could not be converted to the normalized 8-bit sRGB form; convert it to an 8-bit PNG/JPEG/WebP and retry`,
-              { cause: error51 }
-            );
-          }
-          if (error51.code !== "IMAGE_TYPE_MISMATCH") throw error51;
-          const extension2 = (0, import_node_path5.extname)(target.displayPath).toLowerCase();
+          if (!(error51 instanceof AttachmentError) || error51.code !== "IMAGE_TYPE_MISMATCH") throw error51;
+          const extension = (0, import_node_path5.extname)(target.displayPath).toLowerCase();
           throw new Error(
-            `cannot read "${target.displayPath}": the ${extension2} extension declares ${mediaType}, but the bytes use a different image format; rename the file to match its actual format if it is PNG/JPEG/WebP/GIF, or convert it to one of those formats`,
+            `cannot read "${target.displayPath}": the ${extension} extension declares ${mediaType}, but the bytes use a different image format; rename the file to match its actual format if it is PNG/JPEG/WebP/GIF, or convert it to one of those formats`,
             { cause: error51 }
           );
         }
@@ -50675,12 +50363,15 @@ ${image.mediaType} image, ${image.width}x${image.height} px, ${image.bytes} byte
             bytes: ref.bytes,
             width: ref.width,
             height: ref.height,
-            ...ref.name === void 0 ? {} : { name: ref.name },
-            ...ref.originalDimensions === void 0 ? {} : {
-              originalDimensions: { ...ref.originalDimensions }
-            }
+            ...ref.name === void 0 ? {} : { name: ref.name }
           }
         };
+        if (exec.parent !== void 0) {
+          exec.deferContext(createUserMessage({
+            content: imageReadContent(value),
+            source: { kind: "plugin", plugin: "tool-fs" }
+          }));
+        }
         return value;
       },
       // Pure display: a generic card in the read family with a follow-along
@@ -51666,7 +51357,6 @@ ${listing}
     Config: () => Config6,
     DEFAULT_FETCH_MAX_OUTPUT_CHARS: () => DEFAULT_FETCH_MAX_OUTPUT_CHARS,
     DEFAULT_WEB_TOOL_TIMEOUT_MS: () => DEFAULT_WEB_TOOL_TIMEOUT_MS,
-    WEB_SEARCH_MAX_QUERIES: () => WEB_SEARCH_MAX_QUERIES,
     WEB_SEARCH_MAX_RESULTS: () => WEB_SEARCH_MAX_RESULTS,
     apply: () => apply6,
     applyWebFetchTool: () => applyWebFetchTool,
@@ -51678,6 +51368,7 @@ ${listing}
     inject: () => inject6,
     name: () => name6,
     parseFetchArgs: () => parseFetchArgs,
+    parseSearchArgs: () => parseSearchArgs,
     presentFetchCall: () => presentFetchCall,
     presentFetchResult: () => presentFetchResult,
     presentSearchCall: () => presentSearchCall,
@@ -51688,16 +51379,9 @@ ${listing}
 
   // ../../web/tool-web/src/search.ts
   var WEB_SEARCH_MAX_RESULTS = 8;
-  var WEB_SEARCH_MAX_QUERIES = 4;
-  function parseSearchArgs(args, maxQueries) {
-    const queries = args.queries;
-    if (queries.length === 0) throw new Error("queries must contain at least one query");
-    if (queries.length > maxQueries) {
-      const noun = maxQueries === 1 ? "query" : "queries";
-      throw new Error(`queries must contain at most ${maxQueries} ${noun}`);
-    }
-    if (queries.some((query) => query.trim().length === 0)) throw new Error("each query must be a non-empty string");
-    return [...new Set(queries)];
+  function parseSearchArgs(args) {
+    if (args.query.trim().length === 0) throw new Error("query must be a non-empty string");
+    return { query: args.query };
   }
   __name(parseSearchArgs, "parseSearchArgs");
   function sourceLabel(url2, title) {
@@ -51732,8 +51416,7 @@ ${lines.join("\n")}`);
   }
   __name(formatSearchOutput, "formatSearchOutput");
   function presentSearchCall(args) {
-    const title = args.queries.join(", ");
-    return { card: "generic", title, kind: "search", rawInput: title };
+    return { card: "generic", title: args.query, kind: "search", rawInput: args.query };
   }
   __name(presentSearchCall, "presentSearchCall");
   function projectSource(source) {
@@ -51779,85 +51462,24 @@ ${lines.join("\n")}`);
     return {
       card: "web",
       kind: "search",
-      title: args.queries.join(", "),
+      title: args.query,
       sources: meta3.sources,
       truncated: meta3.truncated,
       ...meta3.answer !== void 0 ? { answer: meta3.answer } : {}
     };
   }
   __name(presentSearchResult, "presentSearchResult");
-  async function runSearchQueries(ctx, queries, maxResults, signal) {
-    if (queries.length === 1) {
-      return ctx.web.search({ query: queries[0], maxResults }, signal);
-    }
-    const controller = new AbortController();
-    const batchSignal = AbortSignal.any([signal, controller.signal]);
-    let firstFailure;
-    const results = [];
-    const searches = queries.map(async (query, index) => {
-      try {
-        results[index] = await ctx.web.search({ query, maxResults }, batchSignal);
-      } catch (error51) {
-        if (firstFailure === void 0) firstFailure = { error: error51 };
-        controller.abort(error51);
-        throw error51;
-      }
-    });
-    await Promise.allSettled(searches);
-    if (firstFailure !== void 0) throw firstFailure.error;
-    return mergeSearchResults(queries, results, maxResults);
-  }
-  __name(runSearchQueries, "runSearchQueries");
-  function mergeSearchResults(queries, results, maxResults) {
-    const seen = /* @__PURE__ */ new Set();
-    const sources = [];
-    let sourceRanks = 0;
-    for (const result of results) {
-      sourceRanks = Math.max(sourceRanks, result.sources.length);
-    }
-    let droppedSource = false;
-    merge: for (let rank = 0; rank < sourceRanks; rank++) {
-      for (const result of results) {
-        const source = result.sources[rank];
-        if (source !== void 0 && !seen.has(source.url)) {
-          seen.add(source.url);
-          if (sources.length === maxResults) {
-            droppedSource = true;
-            break merge;
-          }
-          sources.push(source);
-        }
-      }
-    }
-    const contents = results.flatMap((result, index) => {
-      if (result.content === void 0 || result.content.length === 0) return [];
-      return [`### ${queries[index]}
-
-${result.content}`];
-    });
-    return {
-      ...contents.length > 0 ? { content: contents.join("\n\n") } : {},
-      sources,
-      truncated: results.some((result) => result.truncated) || droppedSource
-    };
-  }
-  __name(mergeSearchResults, "mergeSearchResults");
-  function applyWebSearchTool(ctx, maxResults, maxQueries, timeoutMs, fetchEnabled) {
+  function applyWebSearchTool(ctx, maxResults, timeoutMs, fetchEnabled) {
     ctx.systemPrompt.section({
       name: "tool:web_search",
       order: 110,
-      text: fetchEnabled ? `Use the web_search tool to discover current information on the web. The required queries array accepts 1\u2013${maxQueries} non-empty search queries; use a one-item array for a single search. It returns an optional answer plus a list of source URLs. Follow up with web_fetch when you need the full content of a specific result, and cite the relevant URLs as markdown links.` : `Use the web_search tool to discover current information on the web. The required queries array accepts 1\u2013${maxQueries} non-empty search queries; use a one-item array for a single search. It returns an optional answer plus a list of source URLs. Use the returned source snippets when available, and cite the relevant URLs as markdown links.`
+      text: fetchEnabled ? "Use the web_search tool to discover current information on the web. It returns an optional answer plus a list of source URLs. Follow up with web_fetch when you need the full content of a specific result, and cite the relevant URLs as markdown links." : "Use the web_search tool to discover current information on the web. It returns an optional answer plus a list of source URLs. Use the returned source snippets when available, and cite the relevant URLs as markdown links."
     });
     ctx.tools.register(defineTool({
       name: "web_search",
-      description: `Search the web for current information. Provide 1\u2013${maxQueries} queries in the required queries array. Returns an optional summary answer and a list of source URLs.`,
+      description: "Search the web for current information. Returns an optional summary answer and a list of source URLs.",
       parameters: {
-        queries: {
-          type: "array",
-          required: true,
-          items: { type: "string" },
-          description: `Required search queries; accepts 1\u2013${maxQueries} items and merges their results.`
-        }
+        query: { type: "string", required: true, description: "The search query." }
       },
       output: {
         schema: {
@@ -51889,8 +51511,11 @@ ${result.content}`];
       // Provider reads do not mutate parent-agent state.
       isConcurrencySafe: /* @__PURE__ */ __name(() => true, "isConcurrencySafe"),
       async execute(args, exec) {
-        const queries = parseSearchArgs(args, maxQueries);
-        const result = await runSearchQueries(ctx, queries, maxResults, exec.signal);
+        const input = parseSearchArgs(args);
+        const result = await ctx.web.search(
+          { query: input.query, maxResults },
+          exec.signal
+        );
         return {
           ...result.content !== void 0 ? { content: result.content } : {},
           sources: result.sources.map(projectSource),
@@ -52883,7 +52508,6 @@ ${border}` : ""}`;
     search: src_default2.boolean().default(true),
     fetch: src_default2.boolean().default(true),
     searchMaxResults: src_default2.number().default(WEB_SEARCH_MAX_RESULTS),
-    searchMaxQueries: src_default2.number().default(WEB_SEARCH_MAX_QUERIES),
     fetchTimeoutMs: src_default2.number().default(DEFAULT_WEB_TOOL_TIMEOUT_MS),
     searchTimeoutMs: src_default2.number().default(DEFAULT_WEB_TOOL_TIMEOUT_MS),
     fetchMaxOutputChars: src_default2.number().default(DEFAULT_FETCH_MAX_OUTPUT_CHARS)
@@ -52897,12 +52521,11 @@ ${border}` : ""}`;
   function apply6(ctx, config2) {
     const resolved = config2;
     assertPositiveInteger6("searchMaxResults", resolved.searchMaxResults);
-    assertPositiveInteger6("searchMaxQueries", resolved.searchMaxQueries);
     assertPositiveInteger6("fetchTimeoutMs", resolved.fetchTimeoutMs);
     assertPositiveInteger6("searchTimeoutMs", resolved.searchTimeoutMs);
     assertPositiveInteger6("fetchMaxOutputChars", resolved.fetchMaxOutputChars);
     if (resolved.search) {
-      applyWebSearchTool(ctx, resolved.searchMaxResults, resolved.searchMaxQueries, resolved.searchTimeoutMs, resolved.fetch);
+      applyWebSearchTool(ctx, resolved.searchMaxResults, resolved.searchTimeoutMs, resolved.fetch);
     }
     if (resolved.fetch) applyWebFetchTool(ctx, resolved.fetchTimeoutMs, resolved.fetchMaxOutputChars);
   }
@@ -53439,10 +53062,9 @@ ${border}` : ""}`;
       const request = spec.request;
       const parent = request.parent;
       this.assertAdmitting(parent);
-      const persistence = this.requirePersistence();
+      this.requirePersistence();
       assertSubagentMaxDepth(request.maxDepth);
-      const childId = spec.childId ?? SessionId((0, import_node_crypto5.randomUUID)());
-      this.assertChildIdAvailable(childId);
+      const childId = SessionId((0, import_node_crypto5.randomUUID)());
       const childDepth = resolveChildDepth(parent, request.maxDepth);
       const agentProvider = request.agentOptions?.provider ?? parent.options.provider;
       const agentModel = request.agentOptions?.model ?? parent.options.model;
@@ -53466,18 +53088,6 @@ ${border}` : ""}`;
       const lineageSeedLength = prepared.seed?.length ?? 0;
       const seed = seedDescriptorTurn(childId, prepared.seed, descriptor);
       const messageId = await this.locks.run(childId, async () => {
-        spec.signal.throwIfAborted();
-        this.assertAdmitting(parent);
-        this.assertChildIdAvailable(childId);
-        if (spec.childId !== void 0) {
-          const persisted = await persistence.listSnapshots(spec.signal);
-          spec.signal.throwIfAborted();
-          this.assertAdmitting(parent);
-          this.assertChildIdAvailable(childId);
-          if (persisted.some((snapshot) => snapshot.header.id === childId)) {
-            throw new SubagentError(`subagent "${childId}" already exists`, "DUPLICATE_CHILD");
-          }
-        }
         const activation = await this.materialize({
           childId,
           provider: spec.provider,
@@ -53496,12 +53106,6 @@ ${border}` : ""}`;
         );
       });
       return { childId, messageId };
-    }
-    /** Reject one child identity already owned by a live Agent or Session. */
-    assertChildIdAvailable(childId) {
-      if (this.ctx.agents.get(childId) !== void 0 || this.ctx.get("sessions")?.get(childId) !== void 0) {
-        throw new SubagentError(`subagent "${childId}" already exists`, "DUPLICATE_CHILD");
-      }
     }
     /**
      * Deliver one later message to a known continuable child as its next FIFO
@@ -53656,7 +53260,7 @@ ${border}` : ""}`;
           senderSessionId: activation.childId
         }
       });
-      if (delivery === "next-step") {
+      if (delivery === "wakeup") {
         this.sendWaking(parent, message, () => {
           this.sendReport(parent, message, delivery);
         });
@@ -53669,7 +53273,7 @@ ${border}` : ""}`;
      * Perform one waking send to a parent, accounted against that parent's own
      * Activation when it has one. Registering the id before the send is what
      * keeps a continuation-managed parent from being judged quiescent in the
-     * window between a waking send and the microtask that admits it.
+     * window between `followup()` and the microtask that admits it.
      * @param parent - the exact live parent receiving the waking message.
      * @param message - the message whose id is accounted.
      * @param send - the synchronous waking send to perform.
@@ -53685,7 +53289,7 @@ ${border}` : ""}`;
     /** Send one report while translating only the parent's own rejection. */
     sendReport(parent, message, delivery) {
       try {
-        if (delivery === "next-step") parent.steer(message);
+        if (delivery === "wakeup") parent.followup(message);
         else parent.inject(message);
       } catch (error51) {
         throw new SubagentError(
@@ -53760,38 +53364,6 @@ ${border}` : ""}`;
       }
       await Promise.all(materializations.map((materialization) => materialization.settled));
       await this.disposeRoots(targetRoots, "scoped activation(s)");
-    }
-    /**
-     * Release selected resident direct children of one exact live parent without
-     * closing admission for the parent's other continuable children. Owned
-     * descendants are released recursively through the same lifecycle.
-     * @param parent - exact live direct parent authorizing the selected release.
-     * @param childIds - durable direct-child ids to release when resident.
-     * @returns once every selected Activation released its handle.
-     * @throws {SubagentError} `UNAUTHORIZED` when a resident target is not the
-     *   parent's direct continuable child or the parent identity is stale.
-     */
-    async drainChildren(parent, childIds) {
-      if (this.ctx.agents.get(parent.id) !== parent) {
-        throw new SubagentError("selected child teardown requires the exact live parent agent", "UNAUTHORIZED");
-      }
-      const targets = [];
-      for (const childId of new Set(childIds)) {
-        const activation = this.activations.get(childId);
-        if (activation === void 0) continue;
-        if (activation.parentSession !== parent.id || !activation.ancestry.has(parent)) {
-          throw new SubagentError(
-            `subagent "${childId}" is not a direct child of agent "${parent.id}"`,
-            "UNAUTHORIZED"
-          );
-        }
-        targets.push(activation);
-      }
-      for (const activation of targets) {
-        const disposal = this.dispose(activation);
-        void disposal.catch(() => void 0);
-      }
-      await this.disposeRoots(targets, "selected activation(s)");
     }
     /** Dispose independent roots and report every branch failure after all settle. */
     async disposeRoots(roots, failureSubject) {
@@ -54668,26 +54240,16 @@ ${border}` : ""}`;
   __name(assertListingNotCancelled, "assertListingNotCancelled");
 
   // ../../subagent/subagent/src/projection.ts
-  var activeIntervalSchema = external_exports.object({
-    since: external_exports.number().int().nonnegative(),
-    through: external_exports.number().int().nonnegative()
-  }).strict();
   var projectionSchema2 = external_exports.object({
     settledMs: external_exports.number().int().nonnegative(),
-    active: activeIntervalSchema.optional()
-  }).strict().transform(({ settledMs, active }) => ({
-    settledMs,
-    ...active === void 0 ? {} : { active }
-  }));
-  var timingStateSchema = external_exports.object({
-    settledMs: external_exports.number().int().nonnegative(),
-    active: activeIntervalSchema.optional(),
-    pendingTurnStart: external_exports.number().int().nonnegative().optional(),
-    descriptorSeen: external_exports.boolean()
+    active: external_exports.object({
+      since: external_exports.number().int().nonnegative(),
+      through: external_exports.number().int().nonnegative()
+    }).strict().optional()
   }).strict();
   var subagentTimingProjectionDefinition = {
     key: "subagentTiming",
-    stateSchema: timingStateSchema,
+    schema: projectionSchema2,
     init: /* @__PURE__ */ __name(() => ({ descriptorSeen: false, settledMs: 0 }), "init"),
     apply: /* @__PURE__ */ __name((state, event) => {
       if (event.type === "turn/start") {
@@ -54717,16 +54279,13 @@ ${border}` : ""}`;
       if (state.active === void 0) return state;
       return { ...state, active: { ...state.active, through: event.time } };
     }, "apply"),
-    wire: {
-      viewSchema: projectionSchema2,
-      view: /* @__PURE__ */ __name((state) => ({
-        settledMs: state.settledMs,
-        ...state.active === void 0 ? {} : { active: state.active }
-      }), "view")
-    },
+    view: /* @__PURE__ */ __name((state) => ({
+      settledMs: state.settledMs,
+      ...state.active === void 0 ? {} : { active: state.active }
+    }), "view"),
     stateVersion: 2
   };
-  var identityValueSchema = external_exports.discriminatedUnion("mode", [
+  var identitySchema = external_exports.discriminatedUnion("mode", [
     external_exports.object({
       mode: external_exports.literal("one-shot"),
       label: external_exports.string().optional(),
@@ -54737,11 +54296,7 @@ ${border}` : ""}`;
       label: external_exports.string(),
       seq: external_exports.number().int().nonnegative()
     }).strict()
-  ]);
-  var identitySchema = identityValueSchema.nullable();
-  var identityStateSchema = external_exports.object({
-    identity: identityValueSchema.optional()
-  }).strict();
+  ]).nullable();
   function descriptorIdentity(event) {
     let descriptor;
     try {
@@ -54759,22 +54314,20 @@ ${border}` : ""}`;
   __name(descriptorIdentity, "descriptorIdentity");
   var subagentIdentityProjectionDefinition = {
     key: "subagent",
-    stateSchema: identityStateSchema,
+    schema: identitySchema,
     init: /* @__PURE__ */ __name(() => ({}), "init"),
     apply: /* @__PURE__ */ __name((state, event) => {
       if (event.type !== "subagent/descriptor") return state;
       const identity = descriptorIdentity(event);
       return identity === void 0 ? {} : { identity };
     }, "apply"),
-    wire: { viewSchema: identitySchema, view: /* @__PURE__ */ __name((state) => state.identity ?? null, "view") },
+    view: /* @__PURE__ */ __name((state) => state.identity ?? null, "view"),
     // Bumped when the identity gained its `seq` field: an older checkpoint row
     // would replay into a value the schema rejects, so it must refold instead.
     stateVersion: 2
   };
 
   // ../../subagent/subagent/src/out-of-process.ts
-  var utf8Encoder = new TextEncoder();
-  var utf8Decoder = new TextDecoder();
   var NO_START_CAPABILITIES = Object.freeze({
     outputSchema: false,
     depthLimit: false,
@@ -54787,11 +54340,6 @@ ${border}` : ""}`;
     return blocks.filter((block) => block.type === "text").map((block) => block.text).join("");
   }
   __name(finalText, "finalText");
-  function failureDetail(result) {
-    const stopReason = result.stopReason;
-    return result.diagnostic === void 0 ? stopReason : `${stopReason}; diagnostic: ${result.diagnostic}`;
-  }
-  __name(failureDetail, "failureDetail");
   function runOutcome(result) {
     switch (result.stopReason) {
       case "completed":
@@ -54801,10 +54349,10 @@ ${border}` : ""}`;
       case "error":
       case "max-tokens":
       case "refusal":
-        return { status: "failed", detail: failureDetail(result) };
-      // Merge-extensible reasons remain failures with provider-authored detail.
+        return { status: "failed", detail: result.stopReason };
+      // Merge-extensible reasons remain failures with their raw detail.
       default:
-        return { status: "failed", detail: failureDetail(result) };
+        return { status: "failed", detail: String(result.stopReason) };
     }
   }
   __name(runOutcome, "runOutcome");
@@ -54948,21 +54496,6 @@ ${border}` : ""}`;
       const manager = this.continuations;
       if (manager === void 0) return;
       await manager.drainDescendants(parents);
-    }
-    /**
-     * Release selected resident continuable direct children of one exact live
-     * parent. Other children of the same parent remain admitted and resident.
-     * Absent targets and a manager-less composition are accepted no-ops.
-     * @param parent - exact live direct parent authorizing the selected release.
-     * @param childIds - durable direct-child ids to release when resident.
-     * @returns once every selected Activation released its `AgentHandle`.
-     * @throws {SubagentError} `UNAUTHORIZED` when a resident target belongs to a
-     *   different parent or the supplied parent identity is stale.
-     */
-    async drainContinuableChildren(parent, childIds) {
-      const manager = this.continuations;
-      if (manager === void 0) return;
-      await manager.drainChildren(parent, childIds);
     }
     /**
      * Enumerate the parent's direct session-backed subagents without loading or
@@ -55404,7 +54937,7 @@ ${border}` : ""}`;
     try {
       return await settleRun(await start);
     } catch (error51) {
-      return signal.aborted && !(error51 instanceof AggregateError) ? { status: "killed" } : { status: "failed", detail: String(error51) };
+      return signal.aborted ? { status: "killed" } : { status: "failed", detail: String(error51) };
     }
   }
   __name(settleStart, "settleStart");
@@ -55427,22 +54960,19 @@ ${border}` : ""}`;
     }
   }
   __name(stopReasonError, "stopReasonError");
-  function withDiagnosticAndPartialText(error51, result) {
-    const diagnostic = result.diagnostic === void 0 ? "" : `
-Diagnostic: ${result.diagnostic}`;
-    const text = result.output.filter((block) => block.type === "text").map((block) => block.text).join("");
-    const partial2 = text.length === 0 ? "" : `
+  function withPartialText(error51, output) {
+    const text = output.filter((block) => block.type === "text").map((block) => block.text).join("");
+    return text.length === 0 ? error51 : `${error51}
 Partial output before the run ended:
 ${text}`;
-    return `${error51}${diagnostic}${partial2}`;
   }
-  __name(withDiagnosticAndPartialText, "withDiagnosticAndPartialText");
+  __name(withPartialText, "withPartialText");
   async function settleForegroundRun(run) {
     const [execution] = await Promise.allSettled([
       run.result.then((result) => {
         const error51 = stopReasonError(result);
         if (error51 !== void 0) {
-          throw new Error(withDiagnosticAndPartialText(error51, result));
+          throw new Error(withPartialText(error51, result.output));
         }
         return {
           kind: "foreground",
@@ -55569,7 +55099,7 @@ ${text}`;
           },
           render: /* @__PURE__ */ __name((_args, value) => [{
             type: "text",
-            text: value.kind === "background" ? `started background subagent job ${value.jobId}` : value.kind === "continuable" ? `started subagent ${value.subagentId}` : outputValueText(value.output)
+            text: value.kind === "background" ? `started background subagent task ${value.jobId}` : value.kind === "continuable" ? `started subagent ${value.subagentId}` : outputValueText(value.output)
           }], "render")
         },
         // Children never mutate the parent session; the one parent-owned write
@@ -55668,7 +55198,7 @@ ${text}`;
   var inject9 = ["subagents", "tools", "systemPrompt"];
   var REPORT_SECTION_ORDER = 117;
   var Config9 = src_default2.object({
-    reportDelivery: src_default2.union(["quiet", "next-step"]).default("next-step")
+    reportDelivery: src_default2.union(["quiet", "wakeup"]).default("wakeup")
   });
   function installReportTool(childCtx, ctx, delivery) {
     const disposeSection = childCtx.systemPrompt.section({
@@ -56957,9 +56487,8 @@ The repeated calls are not making progress. Do not call this tool with these exa
   };
 
   // ../../llm/llm-deepseek/src/serialize.ts
-  var TOOL_RESULT_IMAGE_TEXT = "Attached image(s) from tool result:";
   function reasoningEffort(effort) {
-    if (effort === "off" || effort === "low" || effort === "high" || effort === "max") {
+    if (effort === "off" || effort === "high" || effort === "max") {
       return effort;
     }
     throw new LlmError(
@@ -56978,7 +56507,7 @@ The repeated calls are not making progress. Do not call this tool with these exa
       );
     }
     if (effort === "off") return { thinking: "disabled" };
-    if (effort === "low" || effort === "high" || effort === "max") {
+    if (effort === "high" || effort === "max") {
       return { thinking: "enabled", reasoningEffort: effort };
     }
     return defaults.thinking === void 0 ? {} : { thinking: defaults.thinking };
@@ -56994,77 +56523,13 @@ The repeated calls are not making progress. Do not call this tool with these exa
     }
   }
   __name(assertTextOnly, "assertTextOnly");
-  function assertSupportedImageRoles(messages) {
-    for (const message of messages) {
-      if (message.role !== "user" && contentHasImage(message.content)) {
-        throw new LlmError(
-          `The DeepSeek chat-completions adapter cannot represent image content in a ${message.role} message.`,
-          "UNSUPPORTED_CONTENT"
-        );
-      }
-    }
-  }
-  __name(assertSupportedImageRoles, "assertSupportedImageRoles");
-  function imageHandle(version4, precededByContent) {
-    return {
-      type: "text",
-      text: `${precededByContent ? "\n" : ""}${requestImageHandleText(version4)}`
-    };
-  }
-  __name(imageHandle, "imageHandle");
-  async function imageParts(block, images, location, precededByContent) {
-    const version4 = images.requestImages.get(block.attachment.attachmentId);
-    if (version4 === void 0) {
-      throw new LlmError(
-        `DeepSeek request image ${block.attachment.attachmentId} was not prepared.`,
-        "INVALID_REQUEST"
-      );
-    }
-    const image = images.representation.kind === "file" ? { type: "file", file_id: await images.representation.resolveFileId(version4, block, location) } : {
-      type: "image_url",
-      image_url: { url: `data:${version4.mediaType};base64,${Buffer.from(version4.data).toString("base64")}` }
-    };
-    return [imageHandle(version4, precededByContent), image];
-  }
-  __name(imageParts, "imageParts");
-  async function contentParts(blocks, images, message, nextImage) {
-    const parts = [];
-    for (const block of blocks) {
-      switch (block.type) {
-        case "text":
-          if (block.text.length > 0) parts.push({ type: "text", text: block.text });
-          break;
-        case "image":
-          nextImage.value += 1;
-          parts.push(...await imageParts(block, images, { message, image: nextImage.value }, parts.length > 0));
-          break;
-        case "tool-result":
-          parts.push(...await contentParts(block.content, images, message, nextImage));
-          break;
-        default:
-          break;
-      }
-    }
-    return parts;
-  }
-  __name(contentParts, "contentParts");
-  function userContent(parts) {
-    const text = [];
-    for (const part of parts) {
-      if (part.type !== "text") return [...parts];
-      text.push(part.text);
-    }
-    return text.join("");
-  }
-  __name(userContent, "userContent");
-  function serializeAssistant(message, defaults) {
+  function serializeAssistant(message) {
     const text = flattenText(message.content);
     const reasoning = message.content.filter((block) => block.type === "reasoning").map((block) => block.text).join("");
     const toolCalls = message.content.filter((block) => block.type === "tool-call").map((block) => ({
       id: block.id,
       type: "function",
-      function: { name: block.name, arguments: block.arguments },
-      ...defaults.toolCallExtras === "google" && block.thoughtSignature !== void 0 ? { extra_content: { google: { thought_signature: block.thoughtSignature } } } : {}
+      function: { name: block.name, arguments: block.arguments }
     }));
     return {
       role: "assistant",
@@ -57077,17 +56542,15 @@ The repeated calls are not making progress. Do not call this tool with these exa
       // the message sits durably in the session log, a null here bricks every
       // later turn of that session.
       content: text,
-      // CoT passback on every reasoning-carrying turn. The official rule
-      // (guides/thinking_mode.mdx) requires it on tool-call turns and ignores it
-      // elsewhere; a gateway re-encoding the conversation for another vendor
-      // recovers that turn's upstream thinking signature by hashing this exact
-      // text, which a tool-call-free turn carries nowhere else.
-      ...reasoning.length > 0 ? { reasoning_content: reasoning } : {},
+      // Official passback rule (guides/thinking_mode.mdx): reasoning_content
+      // must return on tool-call turns; it is ignored on plain turns, so we
+      // drop it there to save tokens.
+      ...toolCalls.length > 0 && reasoning.length > 0 ? { reasoning_content: reasoning } : {},
       ...toolCalls.length > 0 ? { tool_calls: toolCalls } : {}
     };
   }
   __name(serializeAssistant, "serializeAssistant");
-  function serializeMessages(messages, defaults = {}) {
+  function serializeMessages(messages) {
     const wire = [];
     for (const message of messages) {
       assertTextOnly(message.content);
@@ -57096,7 +56559,7 @@ The repeated calls are not making progress. Do not call this tool with these exa
         continue;
       }
       if (message.role === "assistant") {
-        wire.push(serializeAssistant(message, defaults));
+        wire.push(serializeAssistant(message));
         continue;
       }
       const toolResults = message.content.filter((block) => block.type === "tool-result");
@@ -57116,57 +56579,12 @@ The repeated calls are not making progress. Do not call this tool with these exa
     return wire;
   }
   __name(serializeMessages, "serializeMessages");
-  async function serializeMessagesWithImages(messages, images, defaults = {}) {
-    assertSupportedImageRoles(messages);
-    const wire = [];
-    let pendingToolImages = [];
-    const flushToolImages = /* @__PURE__ */ __name(() => {
-      if (pendingToolImages.length === 0) return;
-      wire.push({
-        role: "user",
-        content: [{ type: "text", text: TOOL_RESULT_IMAGE_TEXT }, ...pendingToolImages]
-      });
-      pendingToolImages = [];
-    }, "flushToolImages");
-    for (const [messageIndex, message] of messages.entries()) {
-      const nextImage = { value: 0 };
-      if (message.role === "system") {
-        flushToolImages();
-        wire.push({ role: "system", content: flattenText(message.content) });
-        continue;
-      }
-      if (message.role === "assistant") {
-        flushToolImages();
-        wire.push(serializeAssistant(message, defaults));
-        continue;
-      }
-      const regular = message.content.filter((block) => block.type !== "tool-result");
-      const toolResults = message.content.filter((block) => block.type === "tool-result");
-      const content = userContent(await contentParts(regular, images, messageIndex + 1, nextImage));
-      if (content.length > 0 || toolResults.length === 0) {
-        flushToolImages();
-        wire.push({
-          role: "user",
-          content
-        });
-      }
-      for (const result of toolResults) {
-        const parts = await contentParts(result.content, images, messageIndex + 1, nextImage);
-        const imageParts2 = parts.filter((part) => part.type !== "text");
-        const text = parts.filter((part) => part.type === "text").map((part) => part.text).join("");
-        wire.push({
-          role: "tool",
-          tool_call_id: result.toolCallId,
-          content: text || "(no output)"
-        });
-        pendingToolImages.push(...imageParts2);
-      }
+  function serializeRequest(options, defaults = {}) {
+    const messages = [];
+    if (options.system !== void 0) {
+      messages.push({ role: "system", content: options.system });
     }
-    flushToolImages();
-    return wire;
-  }
-  __name(serializeMessagesWithImages, "serializeMessagesWithImages");
-  function requestWithMessages(options, messages, defaults) {
+    messages.push(...serializeMessages(options.messages));
     const tools = options.tools?.map((tool) => ({
       type: "function",
       function: {
@@ -57181,7 +56599,7 @@ The repeated calls are not making progress. Do not call this tool with these exa
       messages,
       stream: true,
       stream_options: { include_usage: true },
-      ...defaults.emitThinking !== false && resolvedThinking.thinking !== void 0 ? { thinking: { type: resolvedThinking.thinking } } : {},
+      ...resolvedThinking.thinking !== void 0 ? { thinking: { type: resolvedThinking.thinking } } : {},
       ...resolvedThinking.reasoningEffort !== void 0 ? { reasoning_effort: resolvedThinking.reasoningEffort } : {},
       ...tools !== void 0 && tools.length > 0 ? { tools } : {},
       ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
@@ -57189,717 +56607,7 @@ The repeated calls are not making progress. Do not call this tool with these exa
       ...options.stop !== void 0 ? { stop: options.stop } : {}
     };
   }
-  __name(requestWithMessages, "requestWithMessages");
-  function serializeRequest(options, defaults = {}) {
-    const messages = [];
-    if (options.system !== void 0) {
-      messages.push({ role: "system", content: options.system });
-    }
-    messages.push(...serializeMessages(options.messages, defaults));
-    return requestWithMessages(options, messages, defaults);
-  }
   __name(serializeRequest, "serializeRequest");
-  async function serializeRequestWithImages(options, images, defaults = {}) {
-    assertSupportedImageRoles(options.messages);
-    const requestMessages = offloadRequestImagesWithPolicy(options.messages, {
-      representation: images.representation.kind === "file" ? "raw" : "base64",
-      byteLength: /* @__PURE__ */ __name((ref) => {
-        const version4 = images.requestImages.get(ref.attachmentId);
-        if (version4 === void 0) {
-          throw new LlmError(`DeepSeek request image ${ref.attachmentId} was not prepared.`, "INVALID_REQUEST");
-        }
-        return version4.bytes;
-      }, "byteLength"),
-      maxBytes: images.maxRequestImageBytes,
-      ...images.maxImagesPerRequest === void 0 ? {} : { maxImages: images.maxImagesPerRequest },
-      ...images.byteQuantum === void 0 ? {} : { byteQuantum: images.byteQuantum },
-      ...images.countQuantum === void 0 ? {} : { countQuantum: images.countQuantum }
-    });
-    const messages = [];
-    if (options.system !== void 0) {
-      messages.push({ role: "system", content: options.system });
-    }
-    messages.push(...await serializeMessagesWithImages(requestMessages, images, defaults));
-    return requestWithMessages(options, messages, defaults);
-  }
-  __name(serializeRequestWithImages, "serializeRequestWithImages");
-
-  // ../../llm/llm-deepseek/src/file-id.ts
-  function DeepSeekFileId(id) {
-    return id;
-  }
-  __name(DeepSeekFileId, "DeepSeekFileId");
-  function DeepSeekFileScope(scope2) {
-    return scope2;
-  }
-  __name(DeepSeekFileScope, "DeepSeekFileScope");
-
-  // ../../llm/llm-deepseek/src/files-api.ts
-  var MIN_FILE_EXPIRY_SECONDS = 3600;
-  var MAX_FILE_EXPIRY_SECONDS = 2592e3;
-  var MAX_FILE_UPLOAD_BYTES = 128 * 1024 * 1024;
-  var MAX_STORED_FILE_BYTES = 25 * 1024 * 1024 * 1024;
-  var DeepSeekFilesError = class extends LlmError {
-    static {
-      __name(this, "DeepSeekFilesError");
-    }
-    /** Parsed provider detail used only for error classification. */
-    detail;
-    /**
-     * @param message - user-readable provider failure.
-     * @param status - HTTP status returned by the Files API.
-     * @param detail - provider error fields joined for classification.
-     */
-    constructor(message, status, detail) {
-      super(message, status === 401 || status === 403 ? "AUTH" : status === 429 ? "RATE_LIMIT" : status >= 500 ? "SERVER" : "FILES_API", { status });
-      this.name = "DeepSeekFilesError";
-      this.detail = detail;
-    }
-  };
-  function isFilesQuotaError(error51) {
-    return error51 instanceof DeepSeekFilesError && /(?:quota|storage|stored files|file count|too many files)/iu.test(error51.detail);
-  }
-  __name(isFilesQuotaError, "isFilesQuotaError");
-  function invalidResponse(operation) {
-    return new LlmError(`DeepSeek Files API returned an invalid ${operation} response.`, "INVALID_RESPONSE");
-  }
-  __name(invalidResponse, "invalidResponse");
-  function parseFileObject(value, operation) {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) throw invalidResponse(operation);
-    const wire = value;
-    if (typeof wire.id !== "string" || wire.id.length === 0 || wire.object !== "file" || !Number.isSafeInteger(wire.bytes) || wire.bytes < 0 || !Number.isSafeInteger(wire.created_at) || wire.created_at < 0 || typeof wire.filename !== "string" || wire.filename.length === 0 || wire.purpose !== "user_data" || wire.expires_at !== void 0 && (!Number.isSafeInteger(wire.expires_at) || wire.expires_at < 0)) {
-      throw invalidResponse(operation);
-    }
-    return {
-      id: DeepSeekFileId(wire.id),
-      bytes: wire.bytes,
-      createdAt: wire.created_at,
-      filename: wire.filename,
-      purpose: "user_data",
-      ...wire.expires_at === void 0 ? {} : { expiresAt: wire.expires_at }
-    };
-  }
-  __name(parseFileObject, "parseFileObject");
-  function providerErrorDetail(value) {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) return { detail: "" };
-    const error51 = value.error;
-    if (error51 === null || typeof error51 !== "object" || Array.isArray(error51)) return { detail: "" };
-    const fields = error51;
-    const message = typeof fields.message === "string" ? fields.message : void 0;
-    return {
-      ...message === void 0 ? {} : { message },
-      detail: [fields.code, fields.type, fields.message].filter((field) => typeof field === "string").join(" ")
-    };
-  }
-  __name(providerErrorDetail, "providerErrorDetail");
-  var DeepSeekFilesClient = class {
-    static {
-      __name(this, "DeepSeekFilesClient");
-    }
-    baseURL;
-    apiKey;
-    fetchImpl;
-    /**
-     * @param options - endpoint, API-key snapshot, and optional test transport.
-     */
-    constructor(options) {
-      this.baseURL = options.baseURL.replace(/\/+$/u, "");
-      this.apiKey = options.apiKey;
-      this.fetchImpl = options.fetch ?? globalThis.fetch;
-    }
-    async request(path, init, signal) {
-      let response;
-      try {
-        const headers = new Headers(attributionHeaders());
-        headers.set("authorization", `Bearer ${this.apiKey}`);
-        response = await this.fetchImpl(`${this.baseURL}${path}`, {
-          ...init,
-          headers,
-          ...signal === void 0 ? {} : { signal }
-        });
-      } catch (error51) {
-        if (signal?.aborted) throw error51;
-        throw new LlmError(`DeepSeek Files API request to ${this.baseURL} failed`, "TRANSPORT", { cause: error51 });
-      }
-      if (response.ok) return response;
-      let parsed;
-      try {
-        parsed = await response.json();
-      } catch {
-      }
-      const { message, detail } = providerErrorDetail(parsed);
-      throw new DeepSeekFilesError(
-        message ?? `DeepSeek Files API error (HTTP ${response.status})`,
-        response.status,
-        detail
-      );
-    }
-    /**
-     * Upload one image with an explicit expiry.
-     * @param input - deterministic request-version bytes, media type, filename, lifetime, and cancellation.
-     * @returns the validated provider file object, including `expires_at`.
-     */
-    async upload(input) {
-      if (input.data.byteLength > MAX_FILE_UPLOAD_BYTES) {
-        throw new LlmError("DeepSeek Files API upload exceeds 128 MiB.", "INVALID_REQUEST");
-      }
-      if (!Number.isSafeInteger(input.expiresAfterSeconds) || input.expiresAfterSeconds < MIN_FILE_EXPIRY_SECONDS || input.expiresAfterSeconds > MAX_FILE_EXPIRY_SECONDS) {
-        throw new LlmError("DeepSeek file expiry must be between 3600 and 2592000 seconds.", "INVALID_REQUEST");
-      }
-      const form = new FormData();
-      form.set("purpose", "user_data");
-      form.set("expires_after[anchor]", "created_at");
-      form.set("expires_after[seconds]", String(input.expiresAfterSeconds));
-      form.set("file", new Blob([Uint8Array.from(input.data).buffer], { type: input.mediaType }), input.filename);
-      const response = await this.request("/files", { method: "POST", body: form }, input.signal);
-      const file2 = parseFileObject(await response.json(), "upload");
-      if (file2.expiresAt === void 0) throw invalidResponse("upload");
-      return { ...file2, expiresAt: file2.expiresAt };
-    }
-    /**
-     * List one ascending or descending page of user-data files.
-     * @param options - pagination, ordering, and cancellation.
-     * @returns the validated page.
-     */
-    async list(options = {}) {
-      const query = new URLSearchParams({ purpose: "user_data" });
-      if (options.after !== void 0) query.set("after", options.after);
-      if (options.limit !== void 0) query.set("limit", String(options.limit));
-      if (options.order !== void 0) query.set("order", options.order);
-      const response = await this.request(`/files?${query.toString()}`, { method: "GET" }, options.signal);
-      const value = await response.json();
-      if (value === null || typeof value !== "object" || Array.isArray(value)) throw invalidResponse("list");
-      const wire = value;
-      if (wire.object !== "list" || !Array.isArray(wire.data) || typeof wire.has_more !== "boolean" || wire.first_id !== void 0 && typeof wire.first_id !== "string" || wire.last_id !== void 0 && typeof wire.last_id !== "string") {
-        throw invalidResponse("list");
-      }
-      return {
-        data: wire.data.map((item) => parseFileObject(item, "list")),
-        ...typeof wire.first_id === "string" ? { firstId: DeepSeekFileId(wire.first_id) } : {},
-        ...typeof wire.last_id === "string" ? { lastId: DeepSeekFileId(wire.last_id) } : {},
-        hasMore: wire.has_more
-      };
-    }
-    /**
-     * Retrieve one file object.
-     * @param fileId - provider file identifier.
-     * @param signal - request cancellation.
-     * @returns the validated file object.
-     */
-    async retrieve(fileId, signal) {
-      const response = await this.request(`/files/${encodeURIComponent(fileId)}`, { method: "GET" }, signal);
-      return parseFileObject(await response.json(), "retrieve");
-    }
-    /**
-     * Delete one provider file.
-     * @param fileId - provider file identifier.
-     * @param signal - request cancellation.
-     */
-    async delete(fileId, signal) {
-      const response = await this.request(`/files/${encodeURIComponent(fileId)}`, { method: "DELETE" }, signal);
-      const value = await response.json();
-      if (value === null || typeof value !== "object" || Array.isArray(value)) throw invalidResponse("delete");
-      const wire = value;
-      if (wire.id !== fileId || wire.object !== "file" || wire.deleted !== true) throw invalidResponse("delete");
-    }
-  };
-
-  // ../../llm/llm-deepseek/src/upload-index.ts
-  var import_node_crypto8 = __require("node:crypto");
-  var import_promises3 = __require("node:fs/promises");
-  var import_node_path9 = __require("node:path");
-
-  // ../../util/atomic-write/src/index.ts
-  var import_node_crypto7 = __require("node:crypto");
-  var import_promises2 = __require("node:fs/promises");
-  var import_node_path7 = __require("node:path");
-  async function writeFileAtomic2(filename2, content, options) {
-    await (0, import_promises2.mkdir)((0, import_node_path7.dirname)(filename2), {
-      recursive: true,
-      ...options.dirMode === void 0 ? {} : { mode: options.dirMode }
-    });
-    const temp = `${filename2}.${(0, import_node_crypto7.randomBytes)(6).toString("hex")}.tmp`;
-    try {
-      await (0, import_promises2.writeFile)(temp, content, { mode: options.mode, flag: "wx" });
-      await (0, import_promises2.rename)(temp, filename2);
-    } catch (error51) {
-      await (0, import_promises2.rm)(temp, { force: true });
-      throw error51;
-    }
-  }
-  __name(writeFileAtomic2, "writeFileAtomic");
-  async function isLockContention(error51, lockPath) {
-    const code = error51?.code;
-    if (code === "EEXIST") return true;
-    if (code !== "EPERM") return false;
-    try {
-      await (0, import_promises2.lstat)(lockPath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-  __name(isLockContention, "isLockContention");
-  var LOCK_RETRY_INITIAL_MS = 20;
-  var LOCK_RETRY_MAX_MS = 200;
-  var DEFAULT_LOCK_WAIT_MS = 2e3;
-  async function withFileLock(filename2, operation, options) {
-    const lockPath = `${filename2}.lock`;
-    const deadline2 = Date.now() + (options?.waitMs ?? DEFAULT_LOCK_WAIT_MS);
-    let delay = LOCK_RETRY_INITIAL_MS;
-    for (; ; ) {
-      try {
-        await (0, import_promises2.writeFile)(lockPath, `${process.pid}
-`, { mode: 384, flag: "wx" });
-        break;
-      } catch (error51) {
-        if (!await isLockContention(error51, lockPath)) throw error51;
-      }
-      if (Date.now() >= deadline2) {
-        throw new Error(`atomic-write: timed out waiting for the writer lock at ${lockPath}`);
-      }
-      await new Promise((resolve5) => setTimeout(resolve5, delay));
-      delay = Math.min(delay * 2, LOCK_RETRY_MAX_MS);
-    }
-    try {
-      return await operation();
-    } finally {
-      await (0, import_promises2.rm)(lockPath, { force: true });
-    }
-  }
-  __name(withFileLock, "withFileLock");
-
-  // ../../util/home-paths/src/index.ts
-  var import_node_os = __require("node:os");
-  var import_node_path8 = __require("node:path");
-  var DSH_HOME_DIR_NAME = ".dsh";
-  var DEFAULT_DSH_HOME_DISPLAY = `~/${DSH_HOME_DIR_NAME}`;
-  var DSH_HOME_ENV = "DSH_HOME";
-  function defaultDshHome() {
-    return (0, import_node_path8.join)((0, import_node_os.homedir)(), DSH_HOME_DIR_NAME);
-  }
-  __name(defaultDshHome, "defaultDshHome");
-  function expandHomePath(path) {
-    if (path === "~") return (0, import_node_os.homedir)();
-    if (path.startsWith("~/") || path.startsWith("~\\")) return (0, import_node_path8.join)((0, import_node_os.homedir)(), path.slice(2));
-    return path;
-  }
-  __name(expandHomePath, "expandHomePath");
-  function resolveDshHome(configured, env = process.env) {
-    const fromEnv = env[DSH_HOME_ENV];
-    const selected = configured ?? (fromEnv !== void 0 && fromEnv.trim().length > 0 ? fromEnv : defaultDshHome());
-    return (0, import_node_path8.resolve)(expandHomePath(selected));
-  }
-  __name(resolveDshHome, "resolveDshHome");
-
-  // ../../llm/llm-deepseek/src/upload-index.ts
-  var InvalidUploadIndexError = class extends Error {
-    static {
-      __name(this, "InvalidUploadIndexError");
-    }
-  };
-  function deepSeekFileScope(baseURL, apiKey) {
-    const digest = (0, import_node_crypto8.createHash)("sha256").update(baseURL.replace(/\/+$/u, "")).update("\0").update(apiKey).digest("hex");
-    return DeepSeekFileScope(digest);
-  }
-  __name(deepSeekFileScope, "deepSeekFileScope");
-  function absent(error51) {
-    return error51?.code === "ENOENT";
-  }
-  __name(absent, "absent");
-  function parseRecord(value) {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-      throw new InvalidUploadIndexError("llm-deepseek: upload index contains a non-object record");
-    }
-    const record2 = value;
-    if (typeof record2.scope !== "string" || !/^[0-9a-f]{64}$/u.test(record2.scope) || typeof record2.attachmentId !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(record2.attachmentId) || typeof record2.variantId !== "string" || !/^sha256:[0-9a-f]{64}$/u.test(record2.variantId) || typeof record2.fileId !== "string" || record2.fileId.length === 0 || !Number.isSafeInteger(record2.bytes) || record2.bytes < 0 || !Number.isSafeInteger(record2.createdAt) || record2.createdAt < 0 || !Number.isSafeInteger(record2.expiresAt) || record2.expiresAt < 0) {
-      throw new InvalidUploadIndexError("llm-deepseek: upload index contains an invalid record");
-    }
-    return {
-      scope: DeepSeekFileScope(record2.scope),
-      attachmentId: record2.attachmentId,
-      variantId: ImageVariantId(record2.variantId),
-      fileId: DeepSeekFileId(record2.fileId),
-      bytes: record2.bytes,
-      createdAt: record2.createdAt,
-      expiresAt: record2.expiresAt
-    };
-  }
-  __name(parseRecord, "parseRecord");
-  function parseIndex(text) {
-    let value;
-    try {
-      value = JSON.parse(text);
-    } catch (error51) {
-      throw new InvalidUploadIndexError("llm-deepseek: upload index is not valid JSON", { cause: error51 });
-    }
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-      throw new InvalidUploadIndexError("llm-deepseek: upload index is not an object");
-    }
-    const index = value;
-    if (index.formatVersion !== 3 || !Array.isArray(index.records)) {
-      throw new InvalidUploadIndexError("llm-deepseek: unsupported upload index format");
-    }
-    const records = index.records.map(parseRecord);
-    const keys = /* @__PURE__ */ new Set();
-    for (const record2 of records) {
-      const key = `${record2.scope}\0${record2.variantId}`;
-      if (keys.has(key)) throw new InvalidUploadIndexError("llm-deepseek: upload index contains duplicate mappings");
-      keys.add(key);
-    }
-    return { formatVersion: 3, records };
-  }
-  __name(parseIndex, "parseIndex");
-  function reusable(record2, now, refreshMarginMs) {
-    return record2.expiresAt - now > refreshMarginMs;
-  }
-  __name(reusable, "reusable");
-  var DeepSeekUploadIndex = class {
-    static {
-      __name(this, "DeepSeekUploadIndex");
-    }
-    /** Absolute owner-private JSON index path. */
-    path;
-    /**
-     * @param path - explicit test path; omission uses `DSH_HOME/llm-deepseek/files-v3.json`.
-     */
-    constructor(path = (0, import_node_path9.join)(resolveDshHome(), "llm-deepseek", "files-v3.json")) {
-      this.path = path;
-    }
-    async load() {
-      try {
-        return parseIndex(await (0, import_promises3.readFile)(this.path, "utf8"));
-      } catch (error51) {
-        if (absent(error51) || error51 instanceof InvalidUploadIndexError) {
-          return { formatVersion: 3, records: [] };
-        }
-        throw error51;
-      }
-    }
-    async save(index) {
-      await writeFileAtomic2(this.path, `${JSON.stringify(index, void 0, 2)}
-`, {
-        mode: 384,
-        dirMode: 448
-      });
-    }
-    /**
-     * Read one reusable mapping.
-     * @param scope - endpoint/API-key namespace.
-     * @param variantId - complete request-image transformation identity.
-     * @param now - current Unix time in milliseconds.
-     * @param refreshMarginMs - remaining lifetime below which a mapping is not reused.
-     * @returns the mapping when it has enough lifetime remaining.
-     */
-    async get(scope2, variantId, now, refreshMarginMs) {
-      const record2 = (await this.load()).records.find((candidate) => candidate.scope === scope2 && candidate.variantId === variantId);
-      return record2 !== void 0 && reusable(record2, now, refreshMarginMs) ? record2 : void 0;
-    }
-    /**
-     * Publish a completed upload unless another process already published a reusable mapping.
-     * @param candidate - completed remote upload.
-     * @param now - current Unix time in milliseconds.
-     * @param refreshMarginMs - minimum reusable remaining lifetime.
-     * @returns the winning record and whether the candidate entered the index.
-     */
-    async commit(candidate, now, refreshMarginMs) {
-      await (0, import_promises3.mkdir)((0, import_node_path9.dirname)(this.path), { recursive: true, mode: 448 });
-      return withFileLock(this.path, async () => {
-        const index = await this.load();
-        const existing = index.records.find((record2) => record2.scope === candidate.scope && record2.variantId === candidate.variantId && reusable(record2, now, refreshMarginMs));
-        if (existing !== void 0) return { record: existing, accepted: false };
-        const records = index.records.filter((record2) => reusable(record2, now, refreshMarginMs) && !(record2.scope === candidate.scope && record2.variantId === candidate.variantId));
-        records.push(candidate);
-        await this.save({ formatVersion: 3, records });
-        return { record: candidate, accepted: true };
-      });
-    }
-    /**
-     * Remove one exact mapping without deleting a concurrently installed successor.
-     * @param scope - endpoint/API-key namespace.
-     * @param variantId - complete request-image transformation identity.
-     * @param fileId - exact remote generation being invalidated.
-     */
-    async remove(scope2, variantId, fileId) {
-      await (0, import_promises3.mkdir)((0, import_node_path9.dirname)(this.path), { recursive: true, mode: 448 });
-      await withFileLock(this.path, async () => {
-        const index = await this.load();
-        const records = index.records.filter((record2) => !(record2.scope === scope2 && record2.variantId === variantId && record2.fileId === fileId));
-        if (records.length !== index.records.length) await this.save({ formatVersion: 3, records });
-      });
-    }
-    /**
-     * Remove every local mapping for one remote namespace.
-     * @param scope - endpoint/API-key namespace.
-     */
-    async clear(scope2) {
-      await (0, import_promises3.mkdir)((0, import_node_path9.dirname)(this.path), { recursive: true, mode: 448 });
-      await withFileLock(this.path, async () => {
-        const index = await this.load();
-        const records = index.records.filter((record2) => record2.scope !== scope2);
-        if (records.length !== index.records.length) await this.save({ formatVersion: 3, records });
-      });
-    }
-  };
-
-  // ../../llm/llm-deepseek/src/file-store.ts
-  var MAX_CHAT_IMAGE_BYTES = 32 * 1024 * 1024;
-  var OWNED_FILE_PREFIX = "dsh-";
-  function abortReason(signal) {
-    const reason = signal.reason;
-    return reason instanceof Error ? reason : new Error("DeepSeek file upload cancelled with a non-Error reason.", { cause: reason });
-  }
-  __name(abortReason, "abortReason");
-  function uploadFailure(error51) {
-    return error51 instanceof Error ? error51 : new Error("DeepSeek file upload failed with a non-Error reason.", { cause: error51 });
-  }
-  __name(uploadFailure, "uploadFailure");
-  function waitForUpload(operation, signal) {
-    signal?.throwIfAborted();
-    operation.waiters += 1;
-    let released = false;
-    const release = /* @__PURE__ */ __name((cancelledReason) => {
-      if (released) return;
-      released = true;
-      operation.waiters -= 1;
-      if (cancelledReason !== void 0 && operation.waiters === 0 && !operation.settled) {
-        operation.controller.abort(cancelledReason);
-      }
-    }, "release");
-    if (signal === void 0) {
-      return operation.promise.finally(() => {
-        release();
-      });
-    }
-    return new Promise((resolve5, reject) => {
-      const abort = /* @__PURE__ */ __name(() => {
-        const reason = abortReason(signal);
-        release(reason);
-        reject(reason);
-      }, "abort");
-      signal.addEventListener("abort", abort, { once: true });
-      void operation.promise.then((value) => {
-        signal.removeEventListener("abort", abort);
-        release();
-        resolve5(value);
-      }, (error51) => {
-        signal.removeEventListener("abort", abort);
-        release();
-        reject(uploadFailure(error51));
-      });
-    });
-  }
-  __name(waitForUpload, "waitForUpload");
-  function extension(mediaType) {
-    switch (mediaType) {
-      case "image/png":
-        return "png";
-      case "image/jpeg":
-        return "jpeg";
-      case "image/webp":
-        return "webp";
-      case "image/gif":
-        return "gif";
-    }
-  }
-  __name(extension, "extension");
-  function filename(version4) {
-    const attachment = String(version4.attachment.attachmentId).slice("sha256:".length, "sha256:".length + 16);
-    const variant = String(version4.variantId).slice("sha256:".length, "sha256:".length + 8);
-    return `${OWNED_FILE_PREFIX}${attachment}-${variant}.${extension(version4.mediaType)}`;
-  }
-  __name(filename, "filename");
-  var DeepSeekFileStore = class {
-    static {
-      __name(this, "DeepSeekFileStore");
-    }
-    index;
-    now;
-    fetchImpl;
-    inflight = /* @__PURE__ */ new Map();
-    /**
-     * @param options - testable index, clock, and transport boundaries.
-     */
-    constructor(options = {}) {
-      this.index = options.index ?? new DeepSeekUploadIndex();
-      this.now = options.now ?? Date.now;
-      this.fetchImpl = options.fetch;
-    }
-    client(connection) {
-      return new DeepSeekFilesClient({
-        baseURL: connection.baseURL,
-        apiKey: connection.apiKey,
-        ...this.fetchImpl === void 0 ? {} : { fetch: this.fetchImpl }
-      });
-    }
-    /**
-     * Resolve or upload one deterministic request image. Concurrent calls share one upload while retaining independent waits.
-     * @param version - deterministic model-request bytes and complete transformation identity.
-     * @param connection - endpoint and API-key snapshot.
-     * @param policy - expiry and quota-recovery policy.
-     * @param signal - cancellation of this wait; shared transport stops when no waiter remains.
-     * @returns a reusable file id and whether this call published a new upload.
-     */
-    ensureUploaded(version4, connection, policy, signal) {
-      signal?.throwIfAborted();
-      const scope2 = deepSeekFileScope(connection.baseURL, connection.apiKey);
-      const key = `${scope2}\0${version4.variantId}`;
-      let active = this.inflight.get(key);
-      if (active?.controller.signal.aborted) {
-        this.inflight.delete(key);
-        active = void 0;
-      }
-      if (active !== void 0) return waitForUpload(active, signal);
-      const controller = new AbortController();
-      const shared = {
-        controller,
-        settled: false,
-        waiters: 0,
-        promise: void 0
-      };
-      shared.promise = this.ensureUploadedOnce(version4, connection, policy, controller.signal).then((value) => {
-        shared.settled = true;
-        return value;
-      }, (error51) => {
-        shared.settled = true;
-        throw uploadFailure(error51);
-      });
-      this.inflight.set(key, shared);
-      void shared.promise.finally(() => {
-        if (this.inflight.get(key) === shared) this.inflight.delete(key);
-      }).catch(() => {
-      });
-      return waitForUpload(shared, signal);
-    }
-    async ensureUploadedOnce(version4, connection, policy, signal) {
-      if (version4.bytes > MAX_CHAT_IMAGE_BYTES) {
-        throw new LlmError("DeepSeek chat image exceeds the 32 MiB per-image limit.", "INVALID_REQUEST");
-      }
-      const scope2 = deepSeekFileScope(connection.baseURL, connection.apiKey);
-      const now = this.now();
-      const marginMs = policy.refreshMarginSeconds * 1e3;
-      const cached2 = await this.index.get(scope2, version4.variantId, now, marginMs);
-      if (cached2 !== void 0) return { record: cached2, uploaded: false };
-      const client = this.client(connection);
-      const upload = /* @__PURE__ */ __name(async () => {
-        const remote = await client.upload({
-          data: version4.data,
-          mediaType: version4.mediaType,
-          filename: filename(version4),
-          expiresAfterSeconds: policy.expiresAfterSeconds,
-          signal
-        });
-        if (remote.bytes !== version4.data.byteLength) {
-          throw new LlmError("DeepSeek Files API upload response does not match the submitted image.", "INVALID_RESPONSE");
-        }
-        return {
-          scope: scope2,
-          attachmentId: version4.attachment.attachmentId,
-          variantId: version4.variantId,
-          fileId: remote.id,
-          bytes: remote.bytes,
-          createdAt: remote.createdAt * 1e3,
-          expiresAt: remote.expiresAt * 1e3
-        };
-      }, "upload");
-      let candidate;
-      try {
-        candidate = await upload();
-      } catch (error51) {
-        if (!isFilesQuotaError(error51)) throw error51;
-        const deleted = await this.reclaimOldestOwned(connection, policy.quotaCleanupBatch, signal);
-        if (deleted === 0) throw error51;
-        candidate = await upload();
-      }
-      const committed = await this.index.commit(candidate, this.now(), marginMs);
-      if (!committed.accepted) {
-        try {
-          await client.delete(candidate.fileId, signal);
-        } catch {
-        }
-      }
-      return { record: committed.record, uploaded: committed.accepted };
-    }
-    /**
-     * Invalidate one exact local mapping after the chat endpoint rejects its remote id.
-     * @param version - request-image version whose remote generation failed.
-     * @param fileId - exact rejected file id.
-     * @param connection - endpoint and API-key snapshot.
-     */
-    async invalidate(version4, fileId, connection) {
-      await this.index.remove(
-        deepSeekFileScope(connection.baseURL, connection.apiKey),
-        version4.variantId,
-        fileId
-      );
-    }
-    /**
-     * Delete the indexed remote file for one attachment and remove its local mapping.
-     * @param version - exact request-image version to release.
-     * @param connection - endpoint and API-key snapshot.
-     * @param policy - expiry policy used to locate a reusable mapping.
-     * @param signal - request cancellation.
-     * @returns whether an indexed file existed and was deleted.
-     */
-    async release(version4, connection, policy, signal) {
-      const scope2 = deepSeekFileScope(connection.baseURL, connection.apiKey);
-      const record2 = await this.index.get(
-        scope2,
-        version4.variantId,
-        this.now(),
-        policy.refreshMarginSeconds * 1e3
-      );
-      if (record2 === void 0) return false;
-      await this.client(connection).delete(record2.fileId, signal);
-      await this.index.remove(scope2, version4.variantId, record2.fileId);
-      return true;
-    }
-    /**
-     * Delete the oldest provider files whose names identify harness ownership.
-     * @param connection - endpoint and API-key snapshot.
-     * @param count - positive maximum number of files to delete.
-     * @param signal - request cancellation.
-     * @returns number of successfully deleted files.
-     */
-    async reclaimOldestOwned(connection, count, signal) {
-      const client = this.client(connection);
-      let after;
-      const owned = [];
-      while (owned.length < count) {
-        const page = await client.list({
-          ...after === void 0 ? {} : { after },
-          limit: 1e3,
-          order: "asc",
-          ...signal === void 0 ? {} : { signal }
-        });
-        for (const file2 of page.data) {
-          if (!file2.filename.startsWith(OWNED_FILE_PREFIX)) continue;
-          owned.push(file2.id);
-          if (owned.length === count) break;
-        }
-        if (!page.hasMore || page.lastId === void 0 || page.lastId === after) break;
-        after = page.lastId;
-      }
-      for (const fileId of owned) await client.delete(fileId, signal);
-      return owned.length;
-    }
-    /**
-     * Delete every remote harness-owned file in the active API-key namespace and clear its index.
-     * @param connection - endpoint and API-key snapshot.
-     * @param signal - request cancellation.
-     * @returns number of deleted files.
-     */
-    async releaseAll(connection, signal) {
-      let total = 0;
-      for (; ; ) {
-        const deleted = await this.reclaimOldestOwned(connection, 1e3, signal);
-        total += deleted;
-        if (deleted < 1e3) break;
-      }
-      await this.index.clear(deepSeekFileScope(connection.baseURL, connection.apiKey));
-      return total;
-    }
-  };
 
   // ../../../node_modules/.pnpm/eventsource-parser@3.1.0/node_modules/eventsource-parser/dist/index.js
   var ParseError = class extends Error {
@@ -58175,8 +56883,7 @@ ${value}`, dataLines++;
           type: "tool-call",
           id: CallId(block.callId ?? ""),
           name: block.name ?? "",
-          arguments: block.text,
-          ...block.thoughtSignature !== void 0 ? { thoughtSignature: block.thoughtSignature } : {}
+          arguments: block.text
         };
     }
   }
@@ -58239,9 +56946,6 @@ ${value}`, dataLines++;
         }
         for (const call of delta?.tool_calls ?? []) {
           let block = toolBlocks.get(call.index);
-          if (block !== void 0 && call.id !== void 0 && block.callId !== void 0 && call.id !== block.callId) {
-            block = void 0;
-          }
           if (!block) {
             block = open2("tool-call");
             toolBlocks.set(call.index, block);
@@ -58249,8 +56953,6 @@ ${value}`, dataLines++;
           }
           if (call.id !== void 0) block.callId = call.id;
           if (call.function?.name !== void 0) block.name = call.function.name;
-          const signature = call.extra_content?.google?.thought_signature;
-          if (signature !== void 0) block.thoughtSignature = signature;
           const fragment = call.function?.arguments ?? "";
           block.text += fragment;
           yield {
@@ -58272,125 +56974,25 @@ ${value}`, dataLines++;
   __name(translate, "translate");
 
   // ../../llm/llm-deepseek/src/adapter.ts
-  var DEFAULT_MAX_REQUEST_FILES_BYTES = 128 * 1024 * 1024;
-  var DEFAULT_MAX_INLINE_REQUEST_IMAGE_BYTES = 20 * 1024 * 1024;
-  var DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET = 64e4;
-  var DEFAULT_LOW_DETAIL_IMAGE_PIXEL_BUDGET = 512 * 512;
-  var DEFAULT_REQUEST_IMAGE_MAX_BYTES = 1024 * 1024;
-  var DEFAULT_IMAGE_OFFLOAD_BYTE_QUANTUM = 64 * 1024 * 1024;
-  var DEFAULT_INLINE_IMAGE_OFFLOAD_BYTE_QUANTUM = 10 * 1024 * 1024;
-  var DEFAULT_FILE_EXPIRY_SECONDS = 7 * 24 * 60 * 60;
-  var DEFAULT_FILE_REFRESH_MARGIN_SECONDS = 60 * 60;
   var STREAM_IDLE_TIMEOUT_CODE = "LLM_STREAM_IDLE_TIMEOUT";
-  var FILES_API_TIMEOUT_CODE = "DEEPSEEK_FILES_API_TIMEOUT";
   var OFF_REASONING_EFFORT = ReasoningEffortId("off");
-  var LOW_REASONING_EFFORT = ReasoningEffortId("low");
   var HIGH_REASONING_EFFORT = ReasoningEffortId("high");
   var MAX_REASONING_EFFORT = ReasoningEffortId("max");
   var REASONING_EFFORTS = [
     { id: OFF_REASONING_EFFORT, name: "Off" },
-    { id: LOW_REASONING_EFFORT, name: "Low" },
     { id: HIGH_REASONING_EFFORT, name: "High" },
     { id: MAX_REASONING_EFFORT, name: "Max" }
   ];
   var OFF_ONLY_REASONING_EFFORTS = [
     { id: OFF_REASONING_EFFORT, name: "Off" }
   ];
-  var FileResolutionFailure = class extends Error {
-    static {
-      __name(this, "FileResolutionFailure");
-    }
-    constructor(cause) {
-      super("DeepSeek Files API could not resolve a request image.", { cause });
-      this.name = "FileResolutionFailure";
-    }
-  };
-  function collectImageRefs(content, refs) {
-    for (const block of content) {
-      if (block.type === "image") refs.set(block.attachment.attachmentId, block.attachment);
-      else if (block.type === "tool-result") collectImageRefs(block.content, refs);
-    }
-  }
-  __name(collectImageRefs, "collectImageRefs");
-  function resolveRequestImagePolicy(model) {
-    let maxPixels;
-    if (model.imagePixelBudget !== void 0) maxPixels = model.imagePixelBudget;
-    else if (model.imageDetail === "low") maxPixels = DEFAULT_LOW_DETAIL_IMAGE_PIXEL_BUDGET;
-    else maxPixels = DEFAULT_REQUEST_IMAGE_PIXEL_BUDGET;
-    return {
-      maxPixels,
-      maxBytes: model.imageMaxBytes === void 0 ? DEFAULT_REQUEST_IMAGE_MAX_BYTES : model.imageMaxBytes
-    };
-  }
-  __name(resolveRequestImagePolicy, "resolveRequestImagePolicy");
-  async function prepareRequestImages(options, attachments2, model, signal) {
-    const refs = /* @__PURE__ */ new Map();
-    for (const message of options.messages) collectImageRefs(message.content, refs);
-    const policy = resolveRequestImagePolicy(model);
-    const orderedRefs = [...refs.values()];
-    const projected = await Promise.all(orderedRefs.map(
-      (ref) => attachments2.readImageRequest(ref, policy, signal)
-    ));
-    return new Map(orderedRefs.map((ref, index) => [ref.attachmentId, projected[index]]));
-  }
-  __name(prepareRequestImages, "prepareRequestImages");
-  function providerRejectedNormalizedImage(detail) {
-    const reasonBeforeImage = /(?:unsupported|invalid|cannot read|failed to (?:decode|process)).{0,40}image/iu;
-    const imageBeforeReason = /image.{0,40}(?:unsupported|invalid|cannot be decoded)/iu;
-    return reasonBeforeImage.test(detail) || imageBeforeReason.test(detail);
-  }
-  __name(providerRejectedNormalizedImage, "providerRejectedNormalizedImage");
-  function providerRejectedFileId(detail) {
-    const file2 = /\bfile(?:[_ -]?(?:id|api|not[_ -]?found|deleted|expired))?/iu.test(detail);
-    const missing = /(?:expired|not[_ -]?found|deleted|do(?:es)? not exist|not created under (?:this|your) account)/iu.test(detail);
-    const invalidId = /(?:invalid.{0,20}file[_ -]?(?:id|api)|file[_ -]?(?:id|api).{0,20}invalid)/iu.test(detail);
-    return file2 && (missing || invalidId);
-  }
-  __name(providerRejectedFileId, "providerRejectedFileId");
-  function detailNamesFileId(detail, fileId) {
-    let index = detail.indexOf(fileId);
-    while (index >= 0) {
-      const before = detail[index - 1];
-      const after = detail[index + fileId.length];
-      if ((before === void 0 || !/[\p{L}\p{N}_-]/u.test(before)) && (after === void 0 || !/[\p{L}\p{N}_-]/u.test(after))) return true;
-      index = detail.indexOf(fileId, index + 1);
-    }
-    return false;
-  }
-  __name(detailNamesFileId, "detailNamesFileId");
-  function staleMappings(files, detail) {
-    const unique = [...new Map(files.map((file2) => [`${file2.version.variantId}\0${file2.fileId}`, file2])).values()];
-    const exact = unique.filter((file2) => detailNamesFileId(detail, file2.fileId));
-    return exact.length > 0 ? exact : unique;
-  }
-  __name(staleMappings, "staleMappings");
-  function normalizedImageFacts(file2) {
-    const version4 = file2.version;
-    const name13 = version4.attachment.name ?? version4.attachment.attachmentId;
-    const colour = version4.hasAlpha ? "sRGBA" : "sRGB";
-    return `"${name13}" at message ${file2.location.message}, image ${file2.location.image} (${version4.mediaType}, 8-bit ${colour}, ${version4.width}x${version4.height})`;
-  }
-  __name(normalizedImageFacts, "normalizedImageFacts");
-  function normalizedImageDiagnostic(files, providerMessage, providerDetail) {
-    const exact = files.find((file2) => detailNamesFileId(providerDetail, file2.fileId));
-    const target = exact ?? (files.length === 1 ? files[0] : void 0);
-    if (target !== void 0) {
-      return `DeepSeek rejected normalized image ${normalizedImageFacts(target)}: ${providerMessage}. The provider rejected bytes already normalized by the harness; PNG, JPEG, WebP, and GIF remain supported input formats.`;
-    }
-    const candidates = [...new Map(files.map((file2) => [
-      `${file2.version.variantId}\0${file2.location.message}\0${file2.location.image}`,
-      file2
-    ])).values()];
-    return `DeepSeek rejected a normalized request image: ${providerMessage}. Candidate images: ${candidates.map(normalizedImageFacts).join("; ")}. The provider rejected bytes already normalized by the harness; PNG, JPEG, WebP, and GIF remain supported input formats.`;
-  }
-  __name(normalizedImageDiagnostic, "normalizedImageDiagnostic");
   function modelInfo(provider, model) {
     return {
       provider,
       id: model.id,
       name: model.name ?? model.id,
       ...model.description === void 0 ? {} : { description: model.description },
-      inputModalities: model.inputModalities ?? ["text"]
+      inputModalities: ["text"]
     };
   }
   __name(modelInfo, "modelInfo");
@@ -58411,7 +57013,6 @@ ${value}`, dataLines++;
   __name(requestId, "requestId");
   function httpErrorCode(status, error51) {
     if (status === 401 || status === 403) return "AUTH";
-    if (status === 413) return "INVALID_REQUEST";
     const detail = [error51?.code, error51?.type, error51?.message].filter(Boolean).join(" ");
     if (isQuotaExceededError(detail)) return QUOTA_EXCEEDED_CODE;
     if (status === 429) return "RATE_LIMIT";
@@ -58427,12 +57028,10 @@ ${value}`, dataLines++;
     constructor(config2) {
       super();
       this.config = config2;
-      this.files = config2.resolveFiles?.() ?? new DeepSeekFileStore();
     }
     static {
       __name(this, "DeepSeekAdapter");
     }
-    files;
     providerInfo(provider) {
       return { id: provider, name: "DeepSeek" };
     }
@@ -58443,15 +57042,14 @@ ${value}`, dataLines++;
       return Promise.resolve(this.config.options().models.map((model) => modelInfo(provider, model)));
     }
     resolveModel(provider, model, _signal) {
-      return Promise.resolve(this.modelInfoFor(this.config.options(), provider, model));
-    }
-    modelInfoFor(connection, provider, model) {
+      const connection = this.config.options();
       const configured = connection.models.find((entry) => entry.id === model);
       const contextWindow = configured?.contextWindow ?? connection.defaultContextWindow;
-      return {
-        // An uncatalogued endpoint is safely treated as text-only. Declaring an
-        // unverified image capability would let the host persist input that the
-        // endpoint may reject on every later turn.
+      return Promise.resolve({
+        // The chat-completions wire route is text-only regardless of catalog
+        // membership, so the uncatalogued fallback declares the same negative
+        // capability — "unknown" here would let the host accept and persist
+        // images the serializer must then reject.
         ...configured === void 0 ? { provider, id: model, name: model, inputModalities: ["text"] } : modelInfo(provider, configured),
         context: { contextWindow },
         defaultMaxTokens: configured?.maxTokens ?? connection.maxTokens,
@@ -58463,42 +57061,15 @@ ${value}`, dataLines++;
         } : {
           reasoning: {
             efforts: REASONING_EFFORTS,
-            defaultEffort: connection.defaults.reasoningEffort === "off" ? OFF_REASONING_EFFORT : connection.defaults.reasoningEffort === "low" ? LOW_REASONING_EFFORT : connection.defaults.reasoningEffort === "max" ? MAX_REASONING_EFFORT : HIGH_REASONING_EFFORT
+            defaultEffort: connection.defaults.reasoningEffort === "off" ? OFF_REASONING_EFFORT : connection.defaults.reasoningEffort === "max" ? MAX_REASONING_EFFORT : HIGH_REASONING_EFFORT
           }
         }
-      };
-    }
-    prepareCall(provider, model, _signal) {
-      const connection = this.config.options();
-      return Promise.resolve({
-        model: this.modelInfoFor(connection, provider, model),
-        stream: /* @__PURE__ */ __name((options) => this.streamWithConnection(options, connection), "stream")
       });
     }
-    stream(options) {
-      return this.streamWithConnection(options, this.config.options());
-    }
-    async *streamWithConnection(options, connection) {
+    async *stream(options) {
       var _stack = [];
       try {
-        const hasImages = options.messages.some((message) => contentHasImage(message.content));
-        let attachments2;
-        if (hasImages) {
-          const model = connection.models.find((entry) => entry.id === options.model);
-          if (model?.inputModalities?.includes("image") !== true) {
-            throw new LlmError(
-              `DeepSeek model "${options.model}" does not accept image input.`,
-              "UNSUPPORTED_CONTENT"
-            );
-          }
-          attachments2 = this.config.resolveAttachments?.();
-          if (attachments2 === void 0) {
-            throw new LlmError(
-              "DeepSeek image conversion requires the durable attachment service.",
-              "UNSUPPORTED_CONTENT"
-            );
-          }
-        }
+        const connection = this.config.options();
         const apiKey = await this.config.resolveApiKey(connection);
         const userId = this.config.resolveUserId();
         const consumer = new AbortController();
@@ -58510,7 +57081,6 @@ ${value}`, dataLines++;
           connection,
           apiKey,
           userId,
-          attachments2,
           () => {
             watchdog.pulse();
           }
@@ -58553,7 +57123,9 @@ ${value}`, dataLines++;
         __callDispose(_stack, _error, _hasError);
       }
     }
-    async *request(options, signal, connection, apiKey, userId, attachments2, onActivity) {
+    async *request(options, signal, connection, apiKey, userId, onComment) {
+      const body = serializeRequest(options, connection.defaults);
+      const payload = JSON.stringify(body);
       const headers = {
         "authorization": `Bearer ${apiKey}`,
         "content-type": "application/json",
@@ -58563,148 +57135,55 @@ ${value}`, dataLines++;
         ...options.sessionId !== void 0 ? { "x-deepseek-harness-session-id": String(options.sessionId) } : {},
         ...options.purpose === "compaction" ? { "x-deepseek-harness-compact": "1" } : {}
       };
-      const fileConnection = { baseURL: connection.baseURL, apiKey };
-      const model = connection.models.find((entry) => entry.id === options.model);
-      const policy = model === void 0 ? void 0 : resolveRequestImagePolicy(model);
-      const requestMessages = policy === void 0 ? options.messages : offloadRequestImagesWithPolicy(options.messages, {
-        representation: "raw",
-        maxBytes: connection.maxRequestFilesBytes,
-        maxImages: connection.maxImagesPerRequest,
-        byteQuantum: connection.imageOffloadByteQuantum,
-        countQuantum: connection.imageOffloadCountQuantum,
-        byteLength: /* @__PURE__ */ __name((ref) => Math.min(ref.bytes, policy.maxBytes), "byteLength")
-      });
-      const requestOptions = requestMessages === options.messages ? options : { ...options, messages: [...requestMessages] };
-      const requestImages = attachments2 === void 0 || model === void 0 ? /* @__PURE__ */ new Map() : await prepareRequestImages(requestOptions, attachments2, model, signal);
-      let representation = "file";
-      let fileAttempt = 0;
-      while (true) {
-        const usedFiles = [];
-        let body;
-        if (attachments2 === void 0) {
-          body = serializeRequest(requestOptions, connection.defaults);
-        } else if (representation === "base64") {
-          body = await serializeRequestWithImages(requestOptions, {
-            representation: { kind: "base64" },
-            requestImages,
-            maxRequestImageBytes: connection.maxInlineRequestImageBytes,
-            maxImagesPerRequest: connection.maxImagesPerRequest,
-            byteQuantum: connection.inlineImageOffloadByteQuantum,
-            countQuantum: connection.imageOffloadCountQuantum
-          }, connection.defaults);
-        } else {
-          try {
-            body = await serializeRequestWithImages(requestOptions, {
-              representation: {
-                kind: "file",
-                resolveFileId: /* @__PURE__ */ __name(async (version4, _block, location) => {
-                  var _stack = [];
-                  try {
-                    const filesDeadline = __using(_stack, deadline(signal, connection.filesApiTimeoutMs, FILES_API_TIMEOUT_CODE));
-                    let resolved;
-                    try {
-                      resolved = await this.files.ensureUploaded(
-                        version4,
-                        fileConnection,
-                        connection.filePolicy,
-                        filesDeadline.signal
-                      );
-                    } catch (error51) {
-                      if (signal.aborted) throw error51;
-                      throw new FileResolutionFailure(error51);
-                    }
-                    onActivity();
-                    usedFiles.push({ version: version4, fileId: resolved.record.fileId, location });
-                    return resolved.record.fileId;
-                  } catch (_) {
-                    var _error = _, _hasError = true;
-                  } finally {
-                    __callDispose(_stack, _error, _hasError);
-                  }
-                }, "resolveFileId")
-              },
-              requestImages,
-              maxRequestImageBytes: connection.maxRequestFilesBytes,
-              maxImagesPerRequest: connection.maxImagesPerRequest,
-              byteQuantum: connection.imageOffloadByteQuantum,
-              countQuantum: connection.imageOffloadCountQuantum
-            }, connection.defaults);
-          } catch (error51) {
-            if (!(error51 instanceof FileResolutionFailure)) throw error51;
-            representation = "base64";
-            continue;
-          }
-        }
-        const payload = JSON.stringify(body);
-        let response;
-        try {
-          response = await fetch(`${connection.baseURL}/chat/completions`, {
-            method: "POST",
-            headers,
-            body: payload,
-            signal
-          });
-        } catch (error51) {
-          if (signal.aborted) throw error51;
-          throw new LlmError(
-            `DeepSeek API request to ${connection.baseURL} failed`,
-            "TRANSPORT",
-            { cause: error51 }
-          );
-        }
-        if (!response.ok) {
-          let message = `DeepSeek API error (HTTP ${response.status})`;
-          let providerError;
-          const rawResponse = await response.text();
-          try {
-            const parsed = JSON.parse(rawResponse);
-            providerError = parsed.error;
-            if (providerError?.message) message = providerError.message;
-          } catch {
-          }
-          const detail = [providerError?.code, providerError?.type, providerError?.message].filter((field) => typeof field === "string").join(" ");
-          const staleFile = usedFiles.length > 0 && providerRejectedFileId(detail);
-          if (staleFile) {
-            await Promise.all(staleMappings(usedFiles, detail).map((file2) => this.files.invalidate(file2.version, file2.fileId, fileConnection)));
-            if (fileAttempt === 0) {
-              fileAttempt += 1;
-              continue;
-            }
-          }
-          if (response.status === 400 && usedFiles.length > 0 && providerRejectedNormalizedImage(detail)) {
-            message = normalizedImageDiagnostic(usedFiles, message, detail);
-          }
-          const delay = providerRetryAfterMs(response.headers.get("retry-after"));
-          const id = requestId(response.headers);
-          throw new LlmError(message, httpErrorCode(response.status, providerError), {
-            cause: new Error(rawResponse.length > 0 ? rawResponse : `DeepSeek HTTP ${response.status}`),
-            status: response.status,
-            ...delay === void 0 ? {} : { providerRetryAfterMs: delay },
-            ...id === void 0 ? {} : { requestId: id }
-          });
-        }
-        if (!response.body) {
-          throw new LlmError("DeepSeek API returned no response body", "EMPTY_RESPONSE");
-        }
-        yield* translate(parseSse(response.body, onActivity));
-        return;
+      let response;
+      try {
+        response = await fetch(`${connection.baseURL}/chat/completions`, {
+          method: "POST",
+          headers,
+          body: payload,
+          signal
+        });
+      } catch (error51) {
+        if (signal.aborted) throw error51;
+        throw new LlmError(
+          `DeepSeek API request to ${connection.baseURL} failed`,
+          "TRANSPORT",
+          { cause: error51 }
+        );
       }
+      if (!response.ok) {
+        let message = `DeepSeek API error (HTTP ${response.status})`;
+        let providerError;
+        try {
+          const parsed = await response.json();
+          providerError = parsed.error;
+          if (providerError?.message) message = providerError.message;
+        } catch {
+        }
+        const delay = providerRetryAfterMs(response.headers.get("retry-after"));
+        const id = requestId(response.headers);
+        throw new LlmError(message, httpErrorCode(response.status, providerError), {
+          status: response.status,
+          ...delay === void 0 ? {} : { providerRetryAfterMs: delay },
+          ...id === void 0 ? {} : { requestId: id }
+        });
+      }
+      if (!response.body) {
+        throw new LlmError("DeepSeek API returned no response body", "EMPTY_RESPONSE");
+      }
+      yield* translate(parseSse(response.body, onComment));
     }
   };
 
   // ../../credentials/credentials/src/index.ts
   var REF_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
   function credentialRef(value) {
-    if (!isCredentialRefName(value)) {
+    if (!REF_PATTERN.test(value)) {
       throw new TypeError(`credential ref "${value}" must match ${String(REF_PATTERN)}`);
     }
     return value;
   }
   __name(credentialRef, "credentialRef");
-  function isCredentialRefName(value) {
-    return REF_PATTERN.test(value);
-  }
-  __name(isCredentialRefName, "isCredentialRefName");
 
   // ../../interaction/user-questions/src/index.ts
   var UserQuestionError = class extends HarnessError {
@@ -58939,14 +57418,6 @@ ${value}`, dataLines++;
     return active;
   }
   __name(foldPlanMode, "foldPlanMode");
-  var planUnitStateSchema = external_exports.object({
-    active: external_exports.boolean(),
-    wanted: external_exports.boolean().nullable(),
-    running: external_exports.object({
-      commandId: external_exports.string(),
-      wanted: external_exports.boolean()
-    }).strict().nullable()
-  }).strict();
   var planProjectionSchema = external_exports.object({
     active: external_exports.boolean(),
     pending: external_exports.boolean()
@@ -59016,43 +57487,33 @@ ${value}`, dataLines++;
       ctx.inject(["sessionProjections"], (projectionCtx) => {
         projectionCtx.sessionProjections.register({
           key: "plan",
-          stateSchema: planUnitStateSchema,
-          init: /* @__PURE__ */ __name(() => ({ active: false, wanted: null, running: null }), "init"),
+          schema: planProjectionSchema,
+          init: /* @__PURE__ */ __name(() => ({ active: false, wanted: null }), "init"),
           apply: /* @__PURE__ */ __name((state, event) => {
             if (event.type === "command/run" && event.data.name === "plan") {
               if (event.data.args === void 0) return state;
               const wanted = event.data.args.trim() !== "off";
-              return { ...state, running: { commandId: event.data.commandId, wanted } };
-            }
-            if (event.type === "command/done" && event.data.commandId === state.running?.commandId) {
-              const wanted = event.data.kind === "success" && state.running.wanted !== state.active ? state.running.wanted : null;
-              return { ...state, wanted, running: null };
+              return wanted === state.wanted ? state : { active: state.active, wanted };
             }
             if (event.type === "plan/mode") {
-              return { ...state, active: event.data.active, wanted: null };
+              return { active: event.data.active, wanted: null };
             }
             return state;
           }, "apply"),
-          wire: {
-            viewSchema: planProjectionSchema,
-            view: /* @__PURE__ */ __name((state) => {
-              const wanted = state.running?.wanted ?? state.wanted;
-              return { active: state.active, pending: wanted !== null && wanted !== state.active };
-            }, "view")
-          },
-          stateVersion: 2
+          view: /* @__PURE__ */ __name((state) => ({
+            active: state.active,
+            pending: state.wanted !== null && state.wanted !== state.active
+          }), "view"),
+          stateVersion: 1
         });
       });
       ctx.inject(["commands"], (commandCtx) => {
         commandCtx.commands.register({
           name: "plan",
           description: "Enter or leave plan mode",
-          input: { hint: "[off|message]", images: true },
-          handler: /* @__PURE__ */ __name(({ agent, rawInput, attachments: attachments2 }) => {
+          input: { hint: "[off|message]" },
+          handler: /* @__PURE__ */ __name(({ agent, rawInput }) => {
             const message = rawInput.trim();
-            if (message === "off" && attachments2.length > 0) {
-              return { kind: "error", text: "Image attachments cannot accompany /plan off." };
-            }
             if (message === "off") {
               switch (this.set(agent, false)) {
                 case "committed":
@@ -59066,15 +57527,7 @@ ${value}`, dataLines++;
               }
             }
             const outcome = this.set(agent, true);
-            if (message !== "" || attachments2.length > 0) {
-              agent.steer(createUserMessage({
-                content: [
-                  ...attachments2,
-                  ...message === "" ? [] : [{ type: "text", text: message }]
-                ],
-                source: { kind: "user" }
-              }));
-            }
+            if (message !== "") agent.steer(createUserMessage({ content: [{ type: "text", text: message }], source: { kind: "user" } }));
             return {
               kind: "success",
               text: outcome === "committed" ? "Plan mode on. Use /plan off to leave." : "Entering plan mode (applies from the next step). Use /plan off to leave."
@@ -59602,8 +58055,8 @@ ${value}`, dataLines++;
           execute(args) {
             const seconds = Math.max(1, Math.min(600, Math.floor(Number(args.seconds) || 0)));
             let finish2;
-            const done = new Promise((resolve5) => {
-              finish2 = resolve5;
+            const done = new Promise((resolve4) => {
+              finish2 = resolve4;
             });
             const id = jobsRegistry.start({
               kind: "timer",
@@ -59683,7 +58136,7 @@ ${value}`, dataLines++;
       await ctx.plugin(src_default14, { section: "plan:policy" });
       const userQuestions = ctx.get("userQuestions");
       userQuestions.registerProvider({
-        ask: /* @__PURE__ */ __name((request) => new Promise((resolve5, reject) => {
+        ask: /* @__PURE__ */ __name((request) => new Promise((resolve4, reject) => {
           const qid = ++this.questionSeq;
           if (this.pendingQuestion) {
             const old = this.pendingQuestion;
@@ -59710,7 +58163,7 @@ ${value}`, dataLines++;
           this.pendingQuestion = {
             qid,
             questions: request.questions,
-            resolve: resolve5,
+            resolve: resolve4,
             cleanup: /* @__PURE__ */ __name(() => {
               if (signal) signal.removeEventListener("abort", onAbort);
             }, "cleanup")

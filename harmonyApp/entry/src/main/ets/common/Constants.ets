@@ -48,6 +48,7 @@ export enum AiProvider {
   MOONSHOT = 'moonshot',
   OPENAI = 'openai',
   GEMINI = 'gemini',
+  CLAUDE = 'claude',
   CUSTOM = 'custom'
 }
 
@@ -67,16 +68,16 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
     provider: AiProvider.DEEPSEEK,
     label: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com',
-    defaultModel: 'deepseek-v4-flash',
-    models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+    defaultModel: 'deepseek-v4-pro',
+    models: ['deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp'],
     keyUrl: 'https://platform.deepseek.com/api_keys'
   },
   [AiProvider.QWEN]: {
     provider: AiProvider.QWEN,
     label: '千问 Qwen',
     baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-    defaultModel: 'qwen-plus',
-    models: ['qwen3.8-max', 'qwen3.7-plus', 'qwen3.7-flash', 'qwen-plus', 'qwen-flash'],
+    defaultModel: 'qwen3.7-plus',
+    models: ['qwen3.8-max', 'qwen3.7-max', 'qwen3.7-plus', 'qwen3.7-flash', 'qwen3.6-plus'],
     keyUrl: 'https://bailian.console.aliyun.com/'
   },
   [AiProvider.DOUBAO]: {
@@ -112,14 +113,14 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
     baseUrl: 'https://api.moonshot.cn/v1',
     defaultModel: 'kimi-k3',
     models: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.7-code-highspeed', 'kimi-k2.6'],
-    keyUrl: 'https://platform.kimi.com/'
+    keyUrl: 'https://platform.moonshot.cn/'
   },
   [AiProvider.OPENAI]: {
     provider: AiProvider.OPENAI,
     label: 'OpenAI',
     baseUrl: 'https://api.openai.com/v1',
-    defaultModel: 'gpt-5.6-luna',
-    models: ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'],
+    defaultModel: 'gpt-5.4-mini',
+    models: ['gpt-5.6', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-nano'],
     keyUrl: 'https://platform.openai.com/api-keys'
   },
   [AiProvider.GEMINI]: {
@@ -129,6 +130,14 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
     defaultModel: 'gemini-3.7-flash',
     models: ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-flash-latest', 'gemini-pro-latest'],
     keyUrl: 'https://aistudio.google.com/apikey'
+  },
+  [AiProvider.CLAUDE]: {
+    provider: AiProvider.CLAUDE,
+    label: 'Claude',
+    baseUrl: 'https://api.anthropic.com/v1',
+    defaultModel: 'claude-sonnet-4-6',
+    models: ['claude-sonnet-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5'],
+    keyUrl: 'https://console.anthropic.com/settings/keys'
   },
   [AiProvider.CUSTOM]: {
     provider: AiProvider.CUSTOM,
@@ -149,6 +158,7 @@ export const ALL_PROVIDERS: string[] = [
   AiProvider.MOONSHOT,
   AiProvider.OPENAI,
   AiProvider.GEMINI,
+  AiProvider.CLAUDE,
   AiProvider.CUSTOM
 ];
 
@@ -162,8 +172,8 @@ export const IMPORT_ALIAS: Record<string, string> = {
   'kimi': AiProvider.MOONSHOT
 };
 
-/** 导入时协议不兼容、直接跳过的 provider（Anthropic 原生协议，内核仅支持 OpenAI 兼容） */
-export const IMPORT_UNSUPPORTED: string[] = ['claude'];
+/** 导入时协议不兼容、直接跳过的 provider（当前无；Claude 已支持 OpenAI 兼容端点） */
+export const IMPORT_UNSUPPORTED: string[] = [];
 
 /**
  * 2026-08 预设刷新前的旧模型列表（一次性迁移用，见 ConfigService.migratePresets）：

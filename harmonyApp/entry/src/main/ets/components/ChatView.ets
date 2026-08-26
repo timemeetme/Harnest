@@ -44,8 +44,12 @@ export struct ChatView {
   @State editTarget: ChatMessage | null = null;
   @State editText: string = '';
   private scroller: Scroller = new Scroller();
-  /** 滚动位置追踪：距底部 ≤2 项视为"贴底"，贴底才自动跟随流式更新；离开后显示"回到底部"悬浮按钮。 */
+  /** 贴底判定：可见末项 index ≥ 总数-2 视为贴底，贴底才自动跟随流式更新 */
   @State nearBottom: boolean = true;
+  /** 回底按钮：上滑超过约 3 屏才显示，避免轻微滑动弹出干扰 */
+  @State showJumpToBottom: boolean = false;
+  /** 可视区高度（px），onAreaChange 采集，用于屏数阈值换算 */
+  private viewportHeightPx: number = 0;
   /** 上次会话 id：检测会话切换，切换时延迟跳底（等列表重建完） */
   private lastSessionId: string | null = null;
 
@@ -54,6 +58,7 @@ export struct ChatView {
     if (sid !== this.lastSessionId) {
       this.lastSessionId = sid;
       this.nearBottom = true;
+      this.showJumpToBottom = false;
       this.scrollToBottomDelayed(180);
       return;
     }
@@ -98,8 +103,8 @@ export struct ChatView {
         }
         .width('100%').height('100%')
 
-        // 离开底部后显示：一键回底继续跟随流式输出（对标 ChatGPT/Trae）
-        if (!this.nearBottom && this.state.messages.length > 0) {
+        // 上滑超过约 3 屏后显示：一键回底继续跟随流式输出（对标 ChatGPT/Trae）
+        if (this.showJumpToBottom && this.state.messages.length > 0) {
           Text(this.state.isSending ? '⌄ 回到底部 · 跟随最新' : '⌄ 回到底部')
             .fontSize('11fp')
             .fontColor(this.state.isSending ? this.theme.primary : this.theme.textPrimary)
@@ -110,6 +115,7 @@ export struct ChatView {
             .margin({ bottom: 96 })
             .onClick(() => {
               this.nearBottom = true;
+              this.showJumpToBottom = false;
               this.scroller.scrollEdge(Edge.Bottom);
             })
         }
@@ -274,8 +280,24 @@ export struct ChatView {
           total++;
         }
         this.nearBottom = last >= total - 2;
+        this.updateJumpToBottom(last, total);
+      })
+      .onAreaChange((_old: Area, newArea: Area) => {
+        this.viewportHeightPx = newArea.height as number;
       })
     }
+  }
+
+  /** 回底按钮阈值：上滑超过约 3 屏才显示。以可视区高度为 1 屏，条目数 × 平均条目高近似换算。 */
+  private updateJumpToBottom(lastVisibleIndex: number, totalItems: number): void {
+    if (totalItems <= 0 || this.viewportHeightPx <= 0) {
+      this.showJumpToBottom = false;
+      return;
+    }
+    // 平均条目高：用可视高度 / 平均一屏可见条目数（经验值约 6 项/屏）近似
+    const avgItemHeight = this.viewportHeightPx / 6;
+    const remainingItems = totalItems - 1 - lastVisibleIndex;
+    this.showJumpToBottom = remainingItems * avgItemHeight > this.viewportHeightPx * 3;
   }
 
   /** 响应耗时格式化：832ms / 3.4s / 2分13秒 */

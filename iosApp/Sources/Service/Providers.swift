@@ -18,18 +18,20 @@ enum Providers {
     static let moonshot = "moonshot"
     static let openai = "openai"
     static let gemini = "gemini"
+    static let claude = "claude"
     static let custom = "custom"
 
     static let meta: [String: ProviderMeta] = [
         deepseek: ProviderMeta(
             provider: deepseek, label: "DeepSeek", baseUrl: "https://api.deepseek.com",
-            defaultModel: "deepseek-v4-flash", models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+            defaultModel: "deepseek-v4-pro",
+            models: ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"],
             keyUrl: "https://platform.deepseek.com/api_keys"
         ),
         qwen: ProviderMeta(
             provider: qwen, label: "千问 Qwen", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            defaultModel: "qwen-plus",
-            models: ["qwen3.8-max", "qwen3.7-plus", "qwen3.7-flash", "qwen-plus", "qwen-flash"],
+            defaultModel: "qwen3.7-plus",
+            models: ["qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus"],
             keyUrl: "https://bailian.console.aliyun.com/"
         ),
         doubao: ProviderMeta(
@@ -57,12 +59,12 @@ enum Providers {
             provider: moonshot, label: "Kimi 月之暗面", baseUrl: "https://api.moonshot.cn/v1",
             defaultModel: "kimi-k3",
             models: ["kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"],
-            keyUrl: "https://platform.kimi.com/"
+            keyUrl: "https://platform.moonshot.cn/"
         ),
         openai: ProviderMeta(
             provider: openai, label: "OpenAI", baseUrl: "https://api.openai.com/v1",
-            defaultModel: "gpt-5.6-luna",
-            models: ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"],
+            defaultModel: "gpt-5.4-mini",
+            models: ["gpt-5.6", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"],
             keyUrl: "https://platform.openai.com/api-keys"
         ),
         gemini: ProviderMeta(
@@ -71,6 +73,12 @@ enum Providers {
             models: ["gemini-3.7-flash", "gemini-3.6-flash", "gemini-flash-latest", "gemini-pro-latest"],
             keyUrl: "https://aistudio.google.com/apikey"
         ),
+        claude: ProviderMeta(
+            provider: claude, label: "Claude", baseUrl: "https://api.anthropic.com/v1",
+            defaultModel: "claude-sonnet-4-6",
+            models: ["claude-sonnet-5", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"],
+            keyUrl: "https://console.anthropic.com/settings/keys"
+        ),
         custom: ProviderMeta(
             provider: custom, label: "自定义（OpenAI 兼容）", baseUrl: "",
             defaultModel: "", models: [], keyUrl: ""
@@ -78,12 +86,12 @@ enum Providers {
     ]
 
     static let all: [String] = [
-        deepseek, qwen, doubao, zhipu, zhipuCoding, moonshot, openai, gemini, custom,
+        deepseek, qwen, doubao, zhipu, zhipuCoding, moonshot, openai, gemini, claude, custom,
     ]
 
     static let importAlias: [String: String] = ["chatgpt": openai, "kimi": moonshot]
 
-    static let importUnsupported: [String] = ["claude"]
+    static let importUnsupported: [String] = []
 
     /// 2026-08 预设刷新前的旧模型列表（一次性迁移用，见 ConfigService.migratePresets）：
     /// 存量配置里模型列表未定制（全部落在旧预设内）的条目整体替换为官方现役预设；

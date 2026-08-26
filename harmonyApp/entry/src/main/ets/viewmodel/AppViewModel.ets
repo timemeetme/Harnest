@@ -1421,6 +1421,10 @@ export class AppViewModel {
   private describeReason(outcome: ChatOutcome): string {
     const reason = outcome.reason;
     if (reason && reason.error && reason.error.message) {
+      // detail（内核透出的底层 cause 链，如 401 invalid_authentication_error）附加在包装文案后
+      if (reason.error.detail && reason.error.detail.length > 0 && reason.error.detail !== reason.error.message) {
+        return reason.error.message + '\n' + reason.error.detail;
+      }
       return reason.error.message;
     }
     if (reason && reason.kind === 'max-tokens') {

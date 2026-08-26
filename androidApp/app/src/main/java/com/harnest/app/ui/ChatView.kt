@@ -522,12 +522,24 @@ private fun MessageStream(
     val c = harnessColors()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    // 贴底判定：可见最后一项 index ≥ 总数-3 视为贴底；贴底才自动跟随流式更新，离开后显示"回到底部"悬浮按钮
+    // 贴底判定：可见最后一项 index ≥ 总数-3 视为贴底；贴底才自动跟随流式更新
     val nearBottom by remember {
         derivedStateOf {
             val info = listState.layoutInfo
             val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
             last >= info.totalItemsCount - 3
+        }
+    }
+    // 回底按钮：上滑超过约 3 屏才显示，避免轻微滑动就弹出干扰
+    val showJumpToBottom by remember {
+        derivedStateOf {
+            val info = listState.layoutInfo
+            val viewportH = info.viewportSize.height
+            if (viewportH <= 0) return@derivedStateOf false
+            val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return@derivedStateOf false
+            if (lastVisible.index >= info.totalItemsCount - 1) return@derivedStateOf false
+            val remainingItems = info.totalItemsCount - 1 - lastVisible.index
+            remainingItems * viewportH > viewportH * 3
         }
     }
     // 会话切换/首次进入：直接跳到底部（无动画），不依赖消息数变化（两会话消息数可能相同）
@@ -598,9 +610,9 @@ private fun MessageStream(
             }
         }
 
-        // 离开底部后显示：一键回底继续跟随流式输出（对标 ChatGPT/Trae）
+        // 上滑超过约 3 屏后显示：一键回底继续跟随流式输出（对标 ChatGPT/Trae）
         AnimatedVisibility(
-            visible = !nearBottom && messages.isNotEmpty(),
+            visible = showJumpToBottom && messages.isNotEmpty(),
             modifier = Modifier.align(Alignment.BottomCenter),
         ) {
             Text(

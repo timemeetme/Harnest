@@ -89,6 +89,8 @@ export interface ChatReason {
 export interface ChatError {
   code?: string;
   message?: string;
+  /** 内核透出的底层 cause 链（如 401 invalid_authentication_error），仅诊断展示用 */
+  detail?: string;
 }
 
 export interface ModelSelection {

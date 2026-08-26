@@ -22,18 +22,20 @@ object Providers {
     const val MOONSHOT = "moonshot"
     const val OPENAI = "openai"
     const val GEMINI = "gemini"
+    const val CLAUDE = "claude"
     const val CUSTOM = "custom"
 
     val META: LinkedHashMap<String, ProviderMeta> = linkedMapOf(
         DEEPSEEK to ProviderMeta(
             DEEPSEEK, "DeepSeek", "https://api.deepseek.com",
-            "deepseek-v4-flash", listOf("deepseek-v4-flash", "deepseek-v4-pro"),
+            "deepseek-v4-pro",
+            listOf("deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"),
             "https://platform.deepseek.com/api_keys"
         ),
         QWEN to ProviderMeta(
             QWEN, "千问 Qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "qwen-plus",
-            listOf("qwen3.8-max", "qwen3.7-plus", "qwen3.7-flash", "qwen-plus", "qwen-flash"),
+            "qwen3.7-plus",
+            listOf("qwen3.8-max", "qwen3.7-max", "qwen3.7-plus", "qwen3.7-flash", "qwen3.6-plus"),
             "https://bailian.console.aliyun.com/"
         ),
         DOUBAO to ProviderMeta(
@@ -61,12 +63,12 @@ object Providers {
             MOONSHOT, "Kimi 月之暗面", "https://api.moonshot.cn/v1",
             "kimi-k3",
             listOf("kimi-k3", "kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6"),
-            "https://platform.kimi.com/"
+            "https://platform.moonshot.cn/"
         ),
         OPENAI to ProviderMeta(
             OPENAI, "OpenAI", "https://api.openai.com/v1",
-            "gpt-5.6-luna",
-            listOf("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini"),
+            "gpt-5.4-mini",
+            listOf("gpt-5.6", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano"),
             "https://platform.openai.com/api-keys"
         ),
         GEMINI to ProviderMeta(
@@ -75,6 +77,12 @@ object Providers {
             listOf("gemini-3.7-flash", "gemini-3.6-flash", "gemini-flash-latest", "gemini-pro-latest"),
             "https://aistudio.google.com/apikey"
         ),
+        CLAUDE to ProviderMeta(
+            CLAUDE, "Claude", "https://api.anthropic.com/v1",
+            "claude-sonnet-4-6",
+            listOf("claude-sonnet-5", "claude-opus-4-8", "claude-sonnet-4-6", "claude-haiku-4-5"),
+            "https://console.anthropic.com/settings/keys"
+        ),
         CUSTOM to ProviderMeta(CUSTOM, "自定义（OpenAI 兼容）", "", "", emptyList(), ""),
     )
 
@@ -82,7 +90,7 @@ object Providers {
 
     val IMPORT_ALIAS: Map<String, String> = mapOf("chatgpt" to OPENAI, "kimi" to MOONSHOT)
 
-    val IMPORT_UNSUPPORTED: List<String> = listOf("claude")
+    val IMPORT_UNSUPPORTED: List<String> = emptyList()
 
     /**
      * 2026-08 预设刷新前的旧模型列表（一次性迁移用，见 ConfigService.migratePresets）：

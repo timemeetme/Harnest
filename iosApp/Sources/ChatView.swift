@@ -10,8 +10,11 @@ struct ChatView: View {
     @State private var showModelPicker = false
     @State private var renameTarget: SessionRecord?
     @State private var renameText = ""
-    /// 滚动位置追踪：底部锚点距可视区顶 <400pt 视为"贴底"，贴底才自动跟随流式更新；离开后显示"回到底部"悬浮按钮。
+    /// 滚动位置追踪：贴底（锚点接近可视区底部）才自动跟随流式更新；上滑超过约 3 屏后显示"回到底部"悬浮按钮。
     @State private var atBottom = true
+    @State private var showJumpToBottom = false
+    @State private var bottomAnchorMinY: CGFloat = .greatestFiniteMagnitude
+    @State private var scrollViewportHeight: CGFloat = 0
     /// A2：回合耗时跳动器秒数（busy 生命周期内每秒 +1）
     @State private var busySec = 0
     @FocusState private var inputFocused: Bool
@@ -206,14 +209,14 @@ struct ChatView: View {
                                     .id(msg.id)
                             }
                         }
-                        // 底部锚点：向 chatScroll 命名空间报告自身位置，驱动贴底判定
+                        // 底部锚点：向 chatScroll 命名空间报告自身 minY，由 PreferenceKey 做贴底/远底判定
                         Color.clear.frame(height: 1)
                             .id("chatBottom")
                             .background(
                                 GeometryReader { geo in
                                     Color.clear.preference(
                                         key: ChatBottomAnchorKey.self,
-                                        value: geo.frame(in: .named("chatScroll")).minY < 400
+                                        value: geo.frame(in: .named("chatScroll")).minY
                                     )
                                 }
                             )
@@ -223,11 +226,25 @@ struct ChatView: View {
                     .padding(.bottom, 16)
                 }
                 .coordinateSpace(name: "chatScroll")
+                .background(
+                    GeometryReader { geo in
+                        Color.clear
+                            .onAppear {
+                                scrollViewportHeight = geo.size.height
+                                updateBottomState(viewportHeight: geo.size.height)
+                            }
+                            .onChange(of: geo.size.height) { newHeight in
+                                scrollViewportHeight = newHeight
+                                updateBottomState(viewportHeight: newHeight)
+                            }
+                    }
+                )
 
-                // 离开底部后显示：一键回底继续跟随流式输出（对标 ChatGPT/Trae）
-                if !atBottom {
+                // 离开底部超过约 3 屏后显示：一键回底继续跟随流式输出（对标 ChatGPT/Trae）
+                if showJumpToBottom {
                     Button {
                         atBottom = true
+                        showJumpToBottom = false
                         scrollToBottom(proxy)
                     } label: {
                         Text(app.busy ? "⌄ 回到底部 · 跟随最新" : "⌄ 回到底部")
@@ -248,6 +265,7 @@ struct ChatView: View {
             }
             .onChange(of: app.currentSession?.id) {
                 atBottom = true
+                showJumpToBottom = false
                 scrollToBottom(proxy, animated: false)
             }
             .onChange(of: app.currentSession?.messages.count) {
@@ -259,17 +277,32 @@ struct ChatView: View {
             .onChange(of: app.liveItems.reduce(0) { $0 + $1.text.count }) {
                 if atBottom { scrollToBottom(proxy) }
             }
-            .onPreferenceChange(ChatBottomAnchorKey.self) { atBottom = $0 }
+            .onPreferenceChange(ChatBottomAnchorKey.self) { minY in
+                bottomAnchorMinY = minY
+                updateBottomState(viewportHeight: scrollViewportHeight)
+            }
             .onTapGesture { inputFocused = false }
         }
     }
 
-    /// 底部锚点可见性：chatScroll 命名空间内 minY < 400pt 视为贴底。
+    /// 底部锚点 minY 原始值：由 ChatView 结合 ScrollView 可视高度换算贴底/远底状态。
     private struct ChatBottomAnchorKey: PreferenceKey {
-        static var defaultValue: Bool = true
-        static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        static var defaultValue: CGFloat = .greatestFiniteMagnitude
+        static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
             value = nextValue()
         }
+    }
+
+    /// 贴底容差（pt）：锚点距可视区底部 ≤ 此值视为仍在底部。
+    private static let bottomTolerance: CGFloat = 24
+    /// 回底按钮触发阈值：上滑距离超过可视高度的倍数才显示。
+    private static let jumpToBottomScreens: CGFloat = 3
+
+    private func updateBottomState(viewportHeight: CGFloat) {
+        guard viewportHeight > 0, bottomAnchorMinY != .greatestFiniteMagnitude else { return }
+        let distance = bottomAnchorMinY - viewportHeight
+        atBottom = distance <= Self.bottomTolerance
+        showJumpToBottom = distance > viewportHeight * Self.jumpToBottomScreens
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, animated: Bool = true) {

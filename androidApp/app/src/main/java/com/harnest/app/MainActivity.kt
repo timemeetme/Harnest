@@ -604,8 +604,13 @@ class MainActivity : ComponentActivity() {
                 if (reason?.optString("kind") == "max-tokens") failed = true
                 if (reply.isEmpty()) {
                     reply = when {
-                        reason?.optJSONObject("error") != null ->
-                            "⚠️ " + reason.optJSONObject("error")!!.optString("message", reason.optJSONObject("error")!!.optString("code", "error"))
+                        reason?.optJSONObject("error") != null -> {
+                            val errObj = reason.optJSONObject("error")!!
+                            val msg = errObj.optString("message", errObj.optString("code", "error"))
+                            // detail（内核透出的底层 cause 链，如 401 invalid_authentication_error）附加在包装文案后
+                            val detail = errObj.optString("detail", "")
+                            "⚠️ " + if (detail.isNotEmpty() && detail != msg) "$msg\n$detail" else msg
+                        }
                         reason?.optString("kind") == "max-tokens" ->
                             "（模型输出达到长度上限被截断：深度思考占满了输出额度。可简化问题、降低思考强度，或换用输出额度更大的模型后重试）"
                         else -> "（无回复）"

@@ -586,6 +586,10 @@ final class AppStore: ObservableObject {
         if let reason = outcome["reason"] as? [String: Any],
            let err = reason["error"] as? [String: Any],
            let msg = err["message"] as? String, !msg.isEmpty {
+            // detail（内核透出的底层 cause 链，如 401 invalid_authentication_error）附加在包装文案后
+            if let detail = err["detail"] as? String, !detail.isEmpty, detail != msg {
+                return "\(msg)\n\(detail)"
+            }
             return msg
         }
         if let reason = outcome["reason"] as? [String: Any],
