@@ -177,13 +177,11 @@ final class ScriptSandbox: @unchecked Sendable {
         // __sbWriteB64(path, base64) -> JSON 字符串 {ok} / {ok:false, error}（prelude writeBytes 用）
         ctx.setObject({ [weak self, root] (path: String, base64: String) -> String in
             guard let self else { return "{\"ok\":false,\"error\":\"sandbox released\"}" }
-            switch Self.writeB64(root: root, path: path, base64: base64) {
-            case .success:
-                self.markWritten(path)
-                return "{\"ok\":true}"
-            case let .failure(err):
+            if let err = Self.writeB64(root: root, path: path, base64: base64) {
                 return Self.encodeEnvelope(ok: false, data: nil, error: err)
             }
+            self.markWritten(path)
+            return "{\"ok\":true}"
         }, forKeyedSubscript: "__sbWriteB64" as NSString)
 
         // 结算：__sbSettle(json) / __sbSettleErr(msg)（signal 信号量）
@@ -329,24 +327,24 @@ final class ScriptSandbox: @unchecked Sendable {
         return encodeEnvelope(ok: true, data: data.base64EncodedString(), error: nil)
     }
 
-    /// 返回给宿主侧复用：成功时调用方负责 markWritten
-    private static func writeB64(root: URL, path: String, base64: String) -> Result<Void, String> {
+    /// 返回给宿主侧复用：nil = 成功（调用方负责 markWritten），非 nil = 错误文案
+    private static func writeB64(root: URL, path: String, base64: String) -> String? {
         guard let url = resolvePath(root: root, path: path) else {
-            return .failure("path escapes sandbox")
+            return "path escapes sandbox"
         }
         guard let data = Data(base64Encoded: base64) else {
-            return .failure("invalid base64")
+            return "invalid base64"
         }
         if data.count > 262_144 {
-            return .failure("write failed: payload exceeds 262144 bytes")
+            return "write failed: payload exceeds 262144 bytes"
         }
         do {
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
                                                     withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
-            return .success(())
+            return nil
         } catch {
-            return .failure("write failed: \(error.localizedDescription)")
+            return "write failed: \(error.localizedDescription)"
         }
     }
 
