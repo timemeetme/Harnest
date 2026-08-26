@@ -3,6 +3,8 @@
   "names": {
     "Intl": "Intl 可用性取决于 QuickJS 编译选项（quickjs-ng 带 ICU）；内核仅在守卫路径使用，实证无裸引用",
     "SharedArrayBuffer": "QuickJS 支持（无 Worker 场景仅类型引用），不涉及 Atomics 实际操作",
-    "window": "Turndown（web_fetch HTML→Markdown）的 typeof 守卫探测：typeof window !== 'undefined' ? window : {}；QuickJS 下取 {} 后降级 domino 纯 JS DOM（已随 bundle 实证）"
+    "window": "Turndown（web_fetch HTML→Markdown）的 typeof 守卫探测：typeof window !== 'undefined' ? window : {}；QuickJS 下取 {} 后降级 domino 纯 JS DOM（已随 bundle 实证）",
+    "FormData": "仅 DeepSeekFilesClient.upload()（Files API 图片上传）内部构造；移动端入口无图片附件来源，adapter 仅在 contentHasImage 时走 serializeRequestWithImages，该路径不可达（dsh-v0.1.1-rc.2 实证）",
+    "Blob": "同 FormData：仅 Files API upload() 内 new Blob([...]) 打包上传字节；移动端无图片输入，路径不可达（dsh-v0.1.1-rc.2 实证）"
   }
 }

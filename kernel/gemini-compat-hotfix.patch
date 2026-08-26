@@ -1,0 +1,195 @@
+diff --git a/packages/llm/llm-deepseek/src/index.ts b/packages/llm/llm-deepseek/src/index.ts
+index 8d01d9d6bc..407fbbf4bf 100644
+--- a/packages/llm/llm-deepseek/src/index.ts
++++ b/packages/llm/llm-deepseek/src/index.ts
+@@ -68,6 +68,10 @@ export interface Config {
+   thinking?: 'enabled' | 'disabled'
+   /** Default thinking effort (default `high`); `off` disables thinking per request. */
+   reasoningEffort?: 'off' | 'high' | 'max'
++  /** Emit the DeepSeek-style `thinking` wire field (default true); strict OpenAI-compatible gateways that reject the unknown field should set false. */
++  emitThinking?: boolean
++  /** Provider dialect for replaying assistant tool-call history ('google' re-attaches Gemini thought signatures; omit for strict OpenAI endpoints). */
++  toolCallExtras?: 'google' | null
+   /** Default per-request output cap (default 256,000); a model's own cap and explicit request values win. */
+   maxTokens?: number
+   /** Positive context capacity used when the selected model has no exact value (default 1,000,000). */
+@@ -93,6 +97,8 @@ export const Config: z<Config> = z.object({
+   baseURL: z.string(),
+   thinking: z.union(['enabled', 'disabled']),
+   reasoningEffort: z.union(['off', 'high', 'max']),
++  emitThinking: z.boolean(),
++  toolCallExtras: z.union(['google']),
+   maxTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_TOKENS),
+   defaultContextWindow: z.number().step(1).min(1).default(DEFAULT_CONTEXT_WINDOW),
+   models: z.array(catalogModel).default(DEFAULT_MODELS),
+@@ -188,6 +194,8 @@ export function resolveAdapterOptions(config: Config, environment?: LaunchEnviro
+     defaults: {
+       thinking: config.thinking,
+       reasoningEffort: config.reasoningEffort,
++      emitThinking: config.emitThinking,
++      toolCallExtras: config.toolCallExtras ?? undefined,
+     },
+     maxTokens: config.maxTokens ?? DEFAULT_MAX_TOKENS,
+     defaultContextWindow: config.defaultContextWindow ?? DEFAULT_CONTEXT_WINDOW,
+diff --git a/packages/llm/llm-deepseek/src/serialize.ts b/packages/llm/llm-deepseek/src/serialize.ts
+index 34fa214bb9..3ee7f6bfb7 100644
+--- a/packages/llm/llm-deepseek/src/serialize.ts
++++ b/packages/llm/llm-deepseek/src/serialize.ts
+@@ -15,6 +15,20 @@ import type { WireMessage, WireRequest, WireTool } from './types.ts'
+ export interface RequestDefaults {
+   thinking?: 'enabled' | 'disabled' | undefined
+   reasoningEffort?: 'off' | 'high' | 'max' | undefined
++  /**
++   * Whether the DeepSeek-style `thinking:{type}` wire field may be emitted.
++   * Strict OpenAI-compatible gateways (e.g. Gemini's compat layer) reject the
++   * unknown top-level field with HTTP 400; `reasoning_effort` alone carries
++   * the effort there. Defaults to true (native DeepSeek behavior).
++   */
++  emitThinking?: boolean | undefined
++  /**
++   * Provider dialect for replaying assistant tool-call history. 'google'
++   * re-attaches the captured `extra_content.google.thought_signature`:
++   * Gemini 3.x rejects follow-ups that omit it, while strict OpenAI
++   * endpoints reject unknown fields, so extras stay opt-in per provider.
++   */
++  toolCallExtras?: 'google' | undefined
+ }
+ 
+ interface ResolvedThinking {
+@@ -68,7 +82,7 @@ function assertTextOnly(blocks: readonly ContentBlock[]): void {
+ }
+ 
+ /** Serialize one assistant message (text + reasoning + tool calls). */
+-function serializeAssistant(message: Message): WireMessage {
++function serializeAssistant(message: Message, defaults: RequestDefaults): WireMessage {
+   const text = flattenText(message.content)
+   const reasoning = message.content
+     .filter(block => block.type === 'reasoning')
+@@ -80,6 +94,9 @@ function serializeAssistant(message: Message): WireMessage {
+       id: block.id,
+       type: 'function' as const,
+       function: { name: block.name, arguments: block.arguments },
++      ...defaults.toolCallExtras === 'google' && block.thoughtSignature !== undefined
++        ? { extra_content: { google: { thought_signature: block.thoughtSignature } } }
++        : {},
+     }))
+ 
+   return {
+@@ -109,7 +126,7 @@ function serializeAssistant(message: Message): WireMessage {
+  * @param messages - the harness conversation, in order.
+  * @returns the wire messages; order preserved, each tool result expanded into its own entry.
+  */
+-export function serializeMessages(messages: Message[]): WireMessage[] {
++export function serializeMessages(messages: Message[], defaults: RequestDefaults = {}): WireMessage[] {
+   const wire: WireMessage[] = []
+   for (const message of messages) {
+     assertTextOnly(message.content)
+@@ -118,7 +135,7 @@ export function serializeMessages(messages: Message[]): WireMessage[] {
+       continue
+     }
+     if (message.role === 'assistant') {
+-      wire.push(serializeAssistant(message))
++      wire.push(serializeAssistant(message, defaults))
+       continue
+     }
+     // user role: tool results ride in user messages in the harness
+@@ -156,7 +173,7 @@ export function serializeRequest(
+   if (options.system !== undefined) {
+     messages.push({ role: 'system', content: options.system })
+   }
+-  messages.push(...serializeMessages(options.messages))
++  messages.push(...serializeMessages(options.messages, defaults))
+ 
+   const tools: WireTool[] | undefined = options.tools?.map(tool => ({
+     type: 'function',
+@@ -175,7 +192,9 @@ export function serializeRequest(
+     messages,
+     stream: true,
+     stream_options: { include_usage: true },
+-    ...resolvedThinking.thinking !== undefined ? { thinking: { type: resolvedThinking.thinking } } : {},
++    ...defaults.emitThinking !== false && resolvedThinking.thinking !== undefined
++      ? { thinking: { type: resolvedThinking.thinking } }
++      : {},
+     ...resolvedThinking.reasoningEffort !== undefined
+       ? { reasoning_effort: resolvedThinking.reasoningEffort }
+       : {},
+diff --git a/packages/llm/llm-deepseek/src/translate.ts b/packages/llm/llm-deepseek/src/translate.ts
+index f1a6267355..941c439c08 100644
+--- a/packages/llm/llm-deepseek/src/translate.ts
++++ b/packages/llm/llm-deepseek/src/translate.ts
+@@ -21,6 +21,8 @@ interface OpenBlock {
+   /** tool-call only */
+   callId?: string
+   name?: string
++  /** Gemini thought signature captured off the wire; opaque elsewhere. */
++  thoughtSignature?: string
+ }
+ 
+ /**
+@@ -71,6 +73,7 @@ function closeBlock(block: OpenBlock): ContentBlock {
+       id: CallId(block.callId ?? ''),
+       name: block.name ?? '',
+       arguments: block.text,
++      ...block.thoughtSignature !== undefined ? { thoughtSignature: block.thoughtSignature } : {},
+     }
+   }
+ }
+@@ -151,6 +154,13 @@ export async function* translate(payloads: AsyncIterable<string>): AsyncGenerato
+ 
+       for (const call of delta?.tool_calls ?? []) {
+         let block = toolBlocks.get(call.index)
++        // Gemini 鐨?OpenAI 鍏煎灞傛妸骞惰宸ュ叿璋冪敤鎸?姣?chunk 涓€涓畬鏁磋皟鐢?涓嬪彂涓?+        // index 鎭掍负 0锛屼笌 OpenAI 澧為噺鍗忚锛坕d 浠呭嚭鐜板湪棣?chunk锛変笉鍚屻€傚悓涓€
++        // index 鎼哄甫鏂?id 鏃跺繀椤诲彟寮€鏂板潡锛屽惁鍒欎袱娆¤皟鐢ㄧ殑 arguments 浼氳鎷兼帴鎴?+        // 闈炴硶 JSON锛堝 "{}{}"锛夊苟涓㈠け鍓嶄竴涓皟鐢ㄣ€?+        if (block !== undefined && call.id !== undefined && block.callId !== undefined && call.id !== block.callId) {
++          block = undefined
++        }
+         if (!block) {
+           block = open('tool-call')
+           toolBlocks.set(call.index, block)
+@@ -158,6 +168,10 @@ export async function* translate(payloads: AsyncIterable<string>): AsyncGenerato
+         }
+         if (call.id !== undefined) block.callId = call.id
+         if (call.function?.name !== undefined) block.name = call.function.name
++        // Gemini 3.x 涓嬪彂瀹屾暣绛惧悕锛堥潪澧為噺锛夛紝蹇呴』鎹曡幏骞堕殢鍧楁寔涔呭寲锛?+        // follow-up 璇锋眰鍘熸牱鍥炰紶锛屽惁鍒欑鐐逛互 400 鎷掔粷銆?+        const signature = call.extra_content?.google?.thought_signature
++        if (signature !== undefined) block.thoughtSignature = signature
+         const fragment = call.function?.arguments ?? ''
+         block.text += fragment
+         yield {
+diff --git a/packages/llm/llm-deepseek/src/types.ts b/packages/llm/llm-deepseek/src/types.ts
+index a9d7403a35..eead01268d 100644
+--- a/packages/llm/llm-deepseek/src/types.ts
++++ b/packages/llm/llm-deepseek/src/types.ts
+@@ -77,6 +77,8 @@ export interface WireToolCall {
+   id: string
+   type: 'function'
+   function: { name: string; arguments: string }
++  /** Gemini 3.x requires echoing its per-call thought signature on replay. */
++  extra_content?: { google?: { thought_signature?: string } }
+ }
+ 
+ /** One entry of the request `tools` array; `parameters` is a JSON Schema object. */
+@@ -128,6 +130,8 @@ export interface WireToolCallDelta {
+     /** Argument JSON fragment (concatenate across deltas). */
+     arguments?: string
+   }
++  /** Gemini 3.x thought signature (complete per chunk, not a fragment). */
++  extra_content?: { google?: { thought_signature?: string } }
+ }
+ 
+ /**
+diff --git a/packages/llm/llm/src/types.ts b/packages/llm/llm/src/types.ts
+index 326db1cb14..0b69cd99b1 100644
+--- a/packages/llm/llm/src/types.ts
++++ b/packages/llm/llm/src/types.ts
+@@ -82,6 +82,12 @@ export interface ToolCallBlock {
+   name: string
+   /** Raw JSON string as produced by the model. */
+   arguments: string
++  /**
++   * Provider thought signature (Gemini's `extra_content.google.thought_signature`)
++   * captured from the streaming response. Gemini 3.x rejects follow-up requests
++   * whose replayed assistant tool calls omit it; opaque to all other adapters.
++   */
++  thoughtSignature?: string
+ }
+ 
+ /** The result of a tool invocation, sent back to the model. */
