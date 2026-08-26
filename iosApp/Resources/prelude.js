@@ -479,4 +479,27 @@
   };
   globalThis.readBytes = readBytes;
   globalThis.writeBytes = writeBytes;
+
+  // ---------- TextEncoder / TextDecoder polyfill（utf-8 子集） ----------
+  // QuickJS / JSC 沙箱无 Encoding API;模型脚本习惯性调标准 API,薄封装 utf8Encode/utf8Decode。
+  if (typeof globalThis.TextEncoder === 'undefined') {
+    function TextEncoderPolyfill() { this.encoding = 'utf-8'; }
+    TextEncoderPolyfill.prototype.encode = function (input) {
+      return utf8Encode(input === undefined ? '' : String(input));
+    };
+    globalThis.TextEncoder = TextEncoderPolyfill;
+  }
+  if (typeof globalThis.TextDecoder === 'undefined') {
+    function TextDecoderPolyfill(label) {
+      var enc = (label === undefined ? 'utf-8' : String(label)).toLowerCase();
+      if (enc !== 'utf-8' && enc !== 'utf8') throw new Error('TextDecoder: only utf-8 supported');
+      this.encoding = 'utf-8';
+    }
+    TextDecoderPolyfill.prototype.decode = function (input) {
+      if (input === undefined) return '';
+      var bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+      return utf8Decode(bytes);
+    };
+    globalThis.TextDecoder = TextDecoderPolyfill;
+  }
 })();

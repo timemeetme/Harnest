@@ -32754,7 +32754,6 @@ ${value}`, dataLines++;
           },
           execute(args) {
             const seconds = Math.max(1, Math.min(600, Math.floor(Number(args.seconds) || 0)));
-            let timer;
             let finish;
             const done = new Promise((resolve2) => {
               finish = resolve2;
@@ -32764,13 +32763,18 @@ ${value}`, dataLines++;
               label: `count ${seconds}s`,
               run: /* @__PURE__ */ __name(() => ({
                 cancel: /* @__PURE__ */ __name(() => {
-                  if (timer !== void 0) clearTimeout(timer);
                   finish({ status: "killed", detail: "cancelled" });
                 }, "cancel"),
                 done
               }), "run")
             });
-            timer = setTimeout(() => finish({ status: "completed", detail: "time elapsed" }), seconds * 1e3);
+            const bridge = globalThis;
+            if (typeof bridge.__deviceCall === "function") {
+              void bridge.__deviceCall("bgTimer", { seconds }).then(
+                () => finish({ status: "completed", detail: "time elapsed" }),
+                () => finish({ status: "completed", detail: "time elapsed" })
+              );
+            }
             return Promise.resolve({ job_id: id, seconds, status: "running" });
           },
           presentCall: /* @__PURE__ */ __name((args) => ({ card: "generic", title: `Start background timer ${String(args.seconds)}s`, kind: "execute" }), "presentCall")

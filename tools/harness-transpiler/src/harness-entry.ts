@@ -557,26 +557,33 @@ export class HarnessEngine {
         },
         execute(args) {
           const seconds = Math.max(1, Math.min(600, Math.floor(Number(args.seconds) || 0)))
-          let timer: ReturnType<typeof setTimeout> | undefined
           let finish!: (outcome: { status: 'completed' | 'killed' | 'failed'; detail?: string }) => void
           const done = new Promise<{ status: 'completed' | 'killed' | 'failed'; detail?: string }>((resolve) => { finish = resolve })
           // owner 留空（未拥有任务）：agent-loop 的循环 fiber 在回合驱动结束后
           // unwind 其 agent，disposeOwned 会随 owner 生命周期清空任务（任务卡
           // 回合结束即消失）；未拥有任务无清理钩子，跨回合存活、任意会话可见/可杀，
-          // 由用户经后台任务面板的终止按钮收尾（移动端 QuickJS 定时器为 no-op
-          // 桩，到期自然完成仅在有真实定时器的宿主生效）。
+          // 由用户经后台任务面板的终止按钮收尾。
           const id = jobsRegistry.start({
             kind: 'timer',
             label: `count ${seconds}s`,
             run: () => ({
               cancel: () => {
-                if (timer !== undefined) clearTimeout(timer)
                 finish({ status: 'killed', detail: 'cancelled' })
               },
               done,
             }),
           })
-          timer = setTimeout(() => finish({ status: 'completed', detail: 'time elapsed' }), seconds * 1000)
+          // 到期完成走 device 桥（主引擎全局 setTimeout 是 no-op 桩，有意保持 ——
+          // 启用真定时器会激活 deadline/idleWatchdog，与「超时保护由宿主实现」契约
+          // 冲突）：宿主 bgTimer op 延迟 seconds 后回包；finish 幂等，kill 后晚到的
+          // 回包为 no-op；旧宿主无 bgTimer op 时 reject 同样收尾（不永久卡 running）。
+          const bridge = globalThis as unknown as { __deviceCall?: (op: string, args: Record<string, unknown>) => Promise<Record<string, unknown>> }
+          if (typeof bridge.__deviceCall === 'function') {
+            void bridge.__deviceCall('bgTimer', { seconds }).then(
+              () => finish({ status: 'completed', detail: 'time elapsed' }),
+              () => finish({ status: 'completed', detail: 'time elapsed' }),
+            )
+          }
           return Promise.resolve({ job_id: id, seconds, status: 'running' })
         },
         presentCall: args => ({ card: 'generic', title: `Start background timer ${String(args.seconds)}s`, kind: 'execute' }),
