@@ -194,6 +194,18 @@
 | 3 | 「好的，明白了，继续处理其他任务」 | kernel.ps1 六命令验证（记忆更新，本次提交） |
 | 4 | 「前面ios接线子代理的工作完成了吗？」 | 会话内口头答复（已闭环：落盘 68588cd043 + CI 修复 c9f453c744 + 三端全绿），无代码提交 |
 
+### 19. 沙箱定时器与运行时补齐批次（2026-08-26 晚，W，Qoder 会话）
+
+| # | Prompt（逐字原文） | 产出提交 |
+|---|-------------------|----------|
+| 1 | 「更新代码并review，另一个ai又做了一些修改。」 | 会话内核实：pull 后 diff 仅行尾显示差异，无真实变更，无代码提交 |
+| 2 | 「阅读trae工具在本地的项目记忆，生成qoder本项目记忆」 | Qoder 侧项目记忆 8 张卡生成（工具侧记忆，无代码提交） |
+| 3 | 「"D:\Projects\HarnessApp\doc\prompt.md" 历史提交记录在这个文档里，请深入研究增强你对这个项目的理解，并且对应更新项目记忆、知识中心的内容。」 | Qoder 记忆/知识中心更新（无代码提交） |
+| 4 | 「dsh(deepseek harness)有时会自建脚本完成一些任务，比如生成md、网络爬虫之类的，想办法在移动端支持这些脚本，比如使用quickjs，让内核完整潜力可以在移动端更好发挥出来，请问这部分代码有没有实现」 | 会话内口头答复（run_script 沙箱三端已 100% 实现），无代码提交 |
+| 5 | 「"无子进程/无 Node API" 有没有必要、可能性可以补齐」 | 调研结论：子进程死路；缺口 = 沙箱定时器 + TextEncoder/TextDecoder + bg_timer 空转，无代码提交 |
+| 6 | 「出一份实施方案（含三端改动点与验证方式）」 | 实施计划《沙箱定时器与运行时补齐》获批准，无代码提交 |
+| 7 | 「Implement the plan as specified, it is attached for your reference. Do NOT edit the plan file itself.」 | `0e45337533` feat(kernel) + `fd9697a069` feat(ios) + `d1b089379b` feat(android) + `4179395317` feat(harmony) + 本次 docs 收尾 |
+
 ---
 
 ## 二、当前项目进展汇总
@@ -201,8 +213,8 @@
 ### 2.1 仓库状态
 
 - **仓库**：`git@github.com:timemeetme/Harnest.git`，主分支 `main`
-- **当前 HEAD**：`f6e2cc3536`（2026-08-26，记忆收尾）
-- **CI 状态**：三端全绿（HarmonyOS 2m35s / Android 3m32s / iOS 复跑通过，c9f453c744 触发）
+- **当前 HEAD**：`4179395317`（2026-08-26，沙箱定时器与运行时补齐批次；docs 收尾为本次提交）
+- **CI 状态**：三端全绿（HarmonyOS 2m46s / Android 3m28s / iOS 10m49s，4179395317 触发）
 - **双机开发**：Mac（SSH heavencme 协作者）+ Windows（https + gh CLI，需手动挂系统代理 127.0.0.1:7890）
 
 ### 2.2 架构总览
@@ -226,7 +238,7 @@ tools/harness-transpiler (TS 转译器，pnpm)
 - `harmonyApp/` — ArkTS + C++ QuickJS（`ScriptEngine.cpp`），hvigor 构建
 - `shared/` — KMP 共享模块，iOS 产物为 XCFramework（CI 对齐产物）
 
-### 2.3 里程碑一览（63 笔提交）
+### 2.3 里程碑一览（79 笔提交，含本次 docs 收尾）
 
 | 日期 | 里程碑 | 关键提交 |
 |------|--------|----------|
@@ -244,6 +256,7 @@ tools/harness-transpiler (TS 转译器，pnpm)
 | 08-25 | Tier B：run_script 沙箱 + getUsageStats + 鸿蒙 6 项 | `364bc5b96b` 等 4 笔 |
 | 08-26 | Tier B Review + resolvePath 修复 | `53315ce2e0` |
 | 08-26 | OOXML 沙箱扩展（prelude.js + 三端 b64 桥 + CI 全绿） | `c6ceeca620` 等 7 笔 |
+| 08-26 | 沙箱定时器三端 + bg_timer 修复 + TextEncoder/TextDecoder | `0e45337533`…`4179395317` |
 
 ### 2.4 三端功能矩阵（当前状态）
 
@@ -255,6 +268,8 @@ tools/harness-transpiler (TS 转译器，pnpm)
 | 工具卡展开 / steer+subagent / 评分 / fork | ✅ | ✅ | ✅ |
 | 提问卡（跳过/3 题分页） | ✅ | ✅ | ✅ |
 | run_script 沙箱（fetch/readText/writeText/log） | ✅ | ✅ | ✅ |
+| 沙箱定时器（setTimeout/setInterval/clearTimeout）+ TextEncoder/TextDecoder | ✅ | ✅ | ✅ |
+| bg_timer 宿主驱动自完成（bgTimer device op） | ✅ | ✅ | ✅ |
 | OOXML（Prelude.makeXlsx/makeDocx/makePptx + readBytes/writeBytes） | ✅ | ✅ | ✅ |
 | token 水位条（getUsageStats） | ✅ | ✅ | ✅ |
 | /plan 斜杠拦截 | ✅ | ✅ | ✅ |
@@ -338,6 +353,8 @@ xcodebuild test  -project Harnest.xcodeproj -scheme Harnest -destination 'platfo
 - 真机回归万字思考（分段折叠正常、刷新不卡死、回合结束不崩溃）
 - Tier B 真机实测（run_script fetch/readText/writeText/log 链路与超时熔断；水位条分档变色；/plan 斜杠拦截；提问卡分页；数学公式渲染）
 - **OOXML 真机实测**（Prelude.makeXlsx/makeDocx/makePptx 生成文件：writeBytes 落盘 + files 字段回传 + readXlsx/readDocxText 回读，三端各验一轮）
+- **真机·沙箱定时器**（让模型跑 `run_script`：`const t0=Date.now(); await new Promise(r=>setTimeout(r,500)); return Date.now()-t0` 应返回 ≥500 且 <2000；clearTimeout 用例不触发）
+- **真机·bg_timer**（让模型「启动一个 15 秒后台计时器」：后台任务卡应 15s 后从 running → completed——修复前永久 running）
 
 ---
 
