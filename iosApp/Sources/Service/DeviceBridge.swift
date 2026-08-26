@@ -196,6 +196,12 @@ final class DeviceBridge {
             let code = args["code"] as? String ?? ""
             let timeoutMs = args["timeoutMs"] as? Int ?? 60_000
             return ScriptSandbox.shared.runSync(code: code, timeoutMs: timeoutMs)
+        case "bgTimer":
+            // 内核 bg_timer 的宿主定时器：延迟 seconds 后回包（每个 dispatch 独立
+            // Task，sleep 不阻塞其他 op；内核 finish 幂等，kill 后晚到的回包为 no-op）
+            let seconds = max(1, min(600, (args["seconds"] as? Int) ?? Int(args["seconds"] as? Double ?? 0)))
+            try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+            return ["ok": true, "seconds": seconds]
         case "contacts", "calendar", "mail", "call", "sms", "recorder",
              "app", "location", "settings", "reminder", "gui", "scheduler":
             return ["ok": false, "error": "iOS 端暂未接入: \(tool)"]

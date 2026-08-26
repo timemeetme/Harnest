@@ -184,6 +184,15 @@ final class ScriptSandbox: @unchecked Sendable {
             return "{\"ok\":true}"
         }, forKeyedSubscript: "__sbWriteB64" as NSString)
 
+        // __sbTimerStart(id, ms)：宿主延迟 ms 后回投 __sbFireTimer 驱动 JS 侧定时器注册表
+        // （弱捕获本次 run 的 box：run 结束 box 释放/超时置 nil 后，晚到的 fire 自动失效；
+        //  fire 本身是 evaluateScript 边界，兼做微任务泵）
+        ctx.setObject({ [queue, weak box] (id: Int32, ms: Double) in
+            queue.asyncAfter(deadline: .now() + max(0, ms) / 1000.0) {
+                _ = box?.ctx?.evaluateScript("__sbFireTimer(\(id))")
+            }
+        }, forKeyedSubscript: "__sbTimerStart" as NSString)
+
         // 结算：__sbSettle(json) / __sbSettleErr(msg)（signal 信号量）
         ctx.setObject({ (json: String) in
             st.settleResult(json)
@@ -359,6 +368,12 @@ globalThis.fetch = (url, init) => new Promise((resolve, reject) => { const id = 
 globalThis.__sbFetchDone = (id, ok, status, headersJson, body, err) => { const p = __sb.pending.get(id); if (!p) return; __sb.pending.delete(id); if (ok) { p.resolve({ status, ok: status >= 200 && status < 300, headers: JSON.parse(headersJson || '{}'), text: async () => body }); } else { p.reject(new Error(String(err || 'fetch failed'))); } };
 globalThis.readText = (path) => { const r = JSON.parse(__sbRead(String(path))); if (!r.ok) throw new Error(r.error); return r.data; };
 globalThis.writeText = (path, content) => { const r = JSON.parse(__sbWrite(String(path), String(content))); if (!r.ok) throw new Error(r.error); };
+globalThis.__sb.timers = new Map(); globalThis.__sb.timerSeq = 1;
+globalThis.setTimeout = function(fn, ms){ var a = [].slice.call(arguments, 2); var id = __sb.timerSeq++; __sb.timers.set(id, function(){ fn.apply(null, a); }); __sbTimerStart(id, Math.max(0, Number(ms) || 0)); return id; };
+globalThis.clearTimeout = function(id){ __sb.timers.delete(id); };
+globalThis.setInterval = function(fn, ms){ var a = [].slice.call(arguments, 2); var id = __sb.timerSeq++; var period = Math.max(0, Number(ms) || 0); var tick = function(){ __sb.timers.set(id, tick); __sbTimerStart(id, period); fn.apply(null, a); }; __sb.timers.set(id, tick); __sbTimerStart(id, period); return id; };
+globalThis.clearInterval = globalThis.clearTimeout;
+globalThis.__sbFireTimer = function(id){ var f = __sb.timers.get(id); if (!f) return; __sb.timers.delete(id); f(); };
 """
 
     /// 用户代码包裹：settle / settleErr 结算，栈信息截前 3 行
