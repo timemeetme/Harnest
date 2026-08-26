@@ -19,6 +19,8 @@ namespace script {
  *   __sbFetch(url, optsJson)   — HTTP 上行（Promise；宿主经 setFetchHandler 执行，
  *                                 完成后 scriptEngineFetchDone 下行结算）
  *   __sbRead(path) / __sbWrite(path, data) — 沙箱内文件读写（限 cwd 之下，越界抛错）
+ *   __sbTimerStart(id, ms)     — 定时器上行（宿主经 setTimerHandler 延迟，
+ *                                 到期后 scriptEngineTimerFire 下行回投 __sbFireTimer）
  *   __sbSettle(valueJson)      — 显式成功收尾（值为 JSON 文本；非 JSON 按纯字符串）
  *   __sbSettleErr(message)     — 显式失败收尾
  *
@@ -50,6 +52,10 @@ struct ScriptEngine {
      *  之后 napi 层检查 settled 决定是否 resolve pendingDeferred。 */
     void fetchDone(int fetchId, bool ok, const std::string& body);
 
+    /** 宿主定时器到期下行：eval __sbFireTimer(timerId) 并 pump jobs（已 clear 的
+     *  id 由 JS 侧静默跳过）。之后 napi 层同 fetchDone 走超时/FlushPendingRun 收尾。 */
+    void timerFire(int timerId);
+
     /** 超时强制收尾（每个 native 入口调用）：挂起且过线 → fail 全部未决 fetch、
      *  仍未 settle 则强制 timeout 错误。返回 true = 本次产生完成 JSON。 */
     bool enforceTimeout(std::string& outJson);
@@ -62,6 +68,8 @@ struct ScriptEngine {
     napi_deferred pendingDeferred = nullptr; // 异步 run 的 deferred
     napi_env fetchEnv = nullptr;             // fetchHandlerRef 所属 env
     napi_ref fetchHandlerRef = nullptr;      // ArkTS fetch 处理器 (fetchId, url, optionsJson) → void
+    napi_env timerEnv = nullptr;             // timerHandlerRef 所属 env
+    napi_ref timerHandlerRef = nullptr;      // ArkTS 定时器处理器 (timerId, delayMs) → void
 
     // 供文件内静态 C 回调使用
     void markSettled(bool ok, const std::string& payloadJson);
@@ -104,5 +112,9 @@ napi_value NativeScriptEngineDispose(napi_env env, napi_callback_info info);
 napi_value NativeScriptEngineFetchDone(napi_env env, napi_callback_info info);
 // scriptEngineSetFetchHandler(engineId: number, handler: (fetchId: number, url: string, optionsJson: string) => void) → void
 napi_value NativeScriptEngineSetFetchHandler(napi_env env, napi_callback_info info);
+// scriptEngineTimerFire(engineId: number, timerId: number) → void
+napi_value NativeScriptEngineTimerFire(napi_env env, napi_callback_info info);
+// scriptEngineSetTimerHandler(engineId: number, handler: (timerId: number, delayMs: number) => void) → void
+napi_value NativeScriptEngineSetTimerHandler(napi_env env, napi_callback_info info);
 
 } // namespace script

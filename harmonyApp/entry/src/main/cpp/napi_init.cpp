@@ -361,6 +361,8 @@ static napi_value Init(napi_env env, napi_value exports) {
         { "scriptEngineDispose",       nullptr, script::NativeScriptEngineDispose,       nullptr, nullptr, nullptr, napi_default, nullptr },
         { "scriptEngineFetchDone",     nullptr, script::NativeScriptEngineFetchDone,     nullptr, nullptr, nullptr, napi_default, nullptr },
         { "scriptEngineSetFetchHandler", nullptr, script::NativeScriptEngineSetFetchHandler, nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "scriptEngineTimerFire",     nullptr, script::NativeScriptEngineTimerFire,     nullptr, nullptr, nullptr, napi_default, nullptr },
+        { "scriptEngineSetTimerHandler", nullptr, script::NativeScriptEngineSetTimerHandler, nullptr, nullptr, nullptr, napi_default, nullptr },
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;

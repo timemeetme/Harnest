@@ -282,6 +282,35 @@ static JSValue qsb_write_b64(JSContext* ctx, JSValueConst, int argc, JSValueCons
     return JS_NewString(ctx, "{\"ok\":true}");
 }
 
+/** 定时器上行：__sbTimerStart(id, ms) → ArkTS timer handler 延迟 ms 后经
+ *  scriptEngineTimerFire 下行回投；宿主未注册 handler 时静默 no-op（定时器永不触发，
+ *  与 fetch 的显式 reject 不同 — setTimeout 无 Promise 可拒） */
+static JSValue qsb_timer_start(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
+    ScriptEngine* e = EngineOf(ctx);
+    if (!e || argc < 2) return JS_UNDEFINED;
+    int32_t id = 0;
+    double ms = 0;
+    JS_ToInt32(ctx, &id, argv[0]);
+    JS_ToFloat64(ctx, &ms, argv[1]);
+    if (!e->timerEnv || !e->timerHandlerRef) return JS_UNDEFINED;
+    napi_env env = e->timerEnv;
+    napi_value fn = nullptr;
+    napi_get_reference_value(env, e->timerHandlerRef, &fn);
+    if (!fn) return JS_UNDEFINED;
+    napi_value global = nullptr;
+    napi_get_global(env, &global);
+    napi_value aid = nullptr;
+    napi_create_int32(env, id, &aid);
+    napi_value ams = nullptr;
+    napi_create_double(env, ms < 0 ? 0 : ms, &ams);
+    napi_value cbArgs[2] = { aid, ams };
+    napi_status st = napi_call_function(env, global, fn, 2, cbArgs, nullptr);
+    if (st != napi_ok) {
+        OH_LOG_WARN(LOG_APP, TAG, "timer handler invoke failed: %{public}d", (int)st);
+    }
+    return JS_UNDEFINED;
+}
+
 /** 显式收尾（成功）：valueJson 非 JSON 时按纯字符串字面量 */
 static JSValue qsb_settle(JSContext* ctx, JSValueConst, int argc, JSValueConst* argv) {
     ScriptEngine* e = EngineOf(ctx);
@@ -356,7 +385,15 @@ static const char* kBootstrap = R"JS((function () {
   globalThis.writeText = function (path, data) {
     return __sbWrite(String(path), data === undefined ? '' : String(data));
   };
-})();)JS";
+})();
+globalThis.__sb = globalThis.__sb || {};
+globalThis.__sb.timers = new Map(); globalThis.__sb.timerSeq = 1;
+globalThis.setTimeout = function(fn, ms){ var a = [].slice.call(arguments, 2); var id = __sb.timerSeq++; __sb.timers.set(id, function(){ fn.apply(null, a); }); __sbTimerStart(id, Math.max(0, Number(ms) || 0)); return id; };
+globalThis.clearTimeout = function(id){ __sb.timers.delete(id); };
+globalThis.setInterval = function(fn, ms){ var a = [].slice.call(arguments, 2); var id = __sb.timerSeq++; var period = Math.max(0, Number(ms) || 0); var tick = function(){ __sb.timers.set(id, tick); __sbTimerStart(id, period); fn.apply(null, a); }; __sb.timers.set(id, tick); __sbTimerStart(id, period); return id; };
+globalThis.clearInterval = globalThis.clearTimeout;
+globalThis.__sbFireTimer = function(id){ var f = __sb.timers.get(id); if (!f) return; __sb.timers.delete(id); f(); };
+)JS";
 
 // ══════════════════════════════════════════════════════════
 // ScriptEngine
@@ -388,6 +425,7 @@ bool ScriptEngine::init() {
     JS_SetPropertyStr(ctx_, global, "__sbSettleErr", JS_NewCFunction(ctx_, qsb_settle_err, "__sbSettleErr", 1));
     JS_SetPropertyStr(ctx_, global, "__sbReadB64", JS_NewCFunction(ctx_, qsb_read_b64, "__sbReadB64", 1));
     JS_SetPropertyStr(ctx_, global, "__sbWriteB64", JS_NewCFunction(ctx_, qsb_write_b64, "__sbWriteB64", 2));
+    JS_SetPropertyStr(ctx_, global, "__sbTimerStart", JS_NewCFunction(ctx_, qsb_timer_start, "__sbTimerStart", 2));
     JS_FreeValue(ctx_, global);
 
     JSValue r = JS_Eval(ctx_, kBootstrap, strlen(kBootstrap), "<bootstrap>", JS_EVAL_TYPE_GLOBAL);
@@ -422,6 +460,11 @@ void ScriptEngine::dispose() {
     }
     fetchEnv = nullptr;
     fetchHandlerRef = nullptr;
+    if (timerEnv && timerHandlerRef) {
+        napi_delete_reference(timerEnv, timerHandlerRef);
+    }
+    timerEnv = nullptr;
+    timerHandlerRef = nullptr;
     running = false;
     napiEnv = nullptr;
     pendingDeferred = nullptr;
@@ -435,6 +478,15 @@ bool ScriptEngine::run(const std::string& source, const std::string& prelude, ui
     settled = false;
     settledJson.clear();
     running = false;
+
+    // 定时器跨 run 防护：context App 级复用，清掉上一轮注册表（宿主晚到的
+    // timerFire 经 __sbFireTimer 查空静默跳过，不会打进新 run）
+    {
+        static const char* kTimerReset = "globalThis.__sb && __sb.timers && __sb.timers.clear();";
+        JSValue tr = JS_Eval(ctx_, kTimerReset, strlen(kTimerReset), "<timer-reset>", JS_EVAL_TYPE_GLOBAL);
+        if (JS_IsException(tr)) { JSValue err = JS_GetException(ctx_); JS_FreeValue(ctx_, err); }
+        JS_FreeValue(ctx_, tr);
+    }
 
     // OOXML prelude：注入 runtimeJS 之后、用户代码之前全局 eval（挂载 globalThis.Prelude + readBytes/writeBytes）
     if (!prelude.empty()) {
@@ -513,6 +565,20 @@ void ScriptEngine::fetchDone(int fetchId, bool ok, const std::string& body) {
     if (!JS_IsUndefined(resolve)) JS_FreeValue(ctx_, resolve);
     if (!JS_IsUndefined(reject)) JS_FreeValue(ctx_, reject);
     pendingFetches_.erase(it);
+    pumpJobs();
+}
+
+void ScriptEngine::timerFire(int timerId) {
+    if (!ctx_) return;
+    char buf[48];
+    snprintf(buf, sizeof(buf), "__sbFireTimer(%d)", timerId);
+    JSValue r = JS_Eval(ctx_, buf, strlen(buf), "<timer>", JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(r)) {
+        JSValue err = JS_GetException(ctx_);
+        appendLog(std::string("timer fire error: ") + jsErrorString(err));
+        JS_FreeValue(ctx_, err);
+    }
+    JS_FreeValue(ctx_, r);
     pumpJobs();
 }
 
@@ -816,6 +882,52 @@ napi_value NativeScriptEngineSetFetchHandler(napi_env env, napi_callback_info in
             }
             napi_create_reference(env, args[1], 1, &e->fetchHandlerRef);
             e->fetchEnv = env;
+        }
+    }
+    napi_value undef = nullptr;
+    napi_get_undefined(env, &undef);
+    return undef;
+}
+
+// scriptEngineTimerFire(engineId: number, timerId: number) → void
+// 收尾链对齐 scriptEngineFetchDone：enforceTimeout → 下行回投 → enforceTimeout → FlushPendingRun
+napi_value NativeScriptEngineTimerFire(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    if (argc >= 2) {
+        ScriptEngine* e = FindScriptEngine(env, args[0]);
+        if (e) {
+            int32_t timerId = 0;
+            napi_get_value_int32(env, args[1], &timerId);
+            std::string forced;
+            if (!e->enforceTimeout(forced)) {
+                e->timerFire(timerId);
+                (void)e->enforceTimeout(forced); // 定时器回调后仍过线 → 强制收尾
+            }
+            FlushPendingRun(e);
+        }
+    }
+    napi_value undef = nullptr;
+    napi_get_undefined(env, &undef);
+    return undef;
+}
+
+// scriptEngineSetTimerHandler(engineId: number, handler: (timerId, delayMs) => void) → void
+napi_value NativeScriptEngineSetTimerHandler(napi_env env, napi_callback_info info) {
+    size_t argc = 2;
+    napi_value args[2];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    if (argc >= 2) {
+        ScriptEngine* e = FindScriptEngine(env, args[0]);
+        napi_valuetype t = napi_undefined;
+        napi_typeof(env, args[1], &t);
+        if (e && t == napi_function) {
+            if (e->timerEnv && e->timerHandlerRef) {
+                napi_delete_reference(e->timerEnv, e->timerHandlerRef);
+            }
+            napi_create_reference(env, args[1], 1, &e->timerHandlerRef);
+            e->timerEnv = env;
         }
     }
     napi_value undef = nullptr;

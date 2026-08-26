@@ -139,6 +139,7 @@ export class AppViewModel {
     }
     this.scriptEngineId = id;
     native.scriptEngineSetFetchHandler(id, this.scriptFetchHandler);
+    native.scriptEngineSetTimerHandler(id, this.scriptTimerHandler);
     native.deviceBridge().setRunScriptExecutor(
       (source: string, timeoutMs: number): Promise<Record<string, Object>> => this.runScript(source, timeoutMs));
     hilog.info(DOMAIN, TAG, 'script engine %{public}d ready', id);
@@ -191,6 +192,15 @@ export class AppViewModel {
       native.scriptEngineFetchDone(this.scriptEngineId, fetchId, false,
         e.message.length > 0 ? e.message : 'network error');
     });
+  };
+
+  /** 沙箱定时器上行：ArkTS 真 setTimeout 延迟后 timerFire 下行回投（捕获注册时的
+   *  engineId，引擎已销毁/重建时 native 侧查不到实例静默跳过） */
+  private scriptTimerHandler = (timerId: number, delayMs: number): void => {
+    const engineId = this.scriptEngineId;
+    setTimeout(() => {
+      HarnessNative.getInstance().scriptEngineTimerFire(engineId, timerId);
+    }, delayMs);
   };
 
   /** 执行沙箱脚本：envelope JSON → Record（ok/value/error/durationMs/logs/files） */

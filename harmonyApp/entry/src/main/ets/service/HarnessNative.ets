@@ -415,6 +415,17 @@ export class HarnessNative {
     harness.scriptEngineSetFetchHandler(engineId, handler);
   }
 
+  /** 【4】注册沙箱定时器上行 handler（__sbTimerStart → 宿主 setTimeout 延迟回投） */
+  scriptEngineSetTimerHandler(engineId: number,
+    handler: (timerId: number, delayMs: number) => void): void {
+    harness.scriptEngineSetTimerHandler(engineId, handler);
+  }
+
+  /** 【4】沙箱定时器到期下行回投（eval __sbFireTimer 并推进事件循环；已 clear 的 id 静默跳过） */
+  scriptEngineTimerFire(engineId: number, timerId: number): void {
+    harness.scriptEngineTimerFire(engineId, timerId);
+  }
+
   /** 【4】执行沙箱脚本（返回 envelope JSON：ok/value|error/durationMs/logs/files；
    *  preludeSource 非空时先于用户代码全局 eval，OOXML 预置库 prelude.js 用） */
   async scriptEngineRun(engineId: number, source: string, timeoutMs: number, preludeSource: string): Promise<string> {

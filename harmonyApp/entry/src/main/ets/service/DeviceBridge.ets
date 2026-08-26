@@ -152,6 +152,8 @@ export class DeviceBridge {
         return this.opScheduler(args);
       case 'runScript':
         return this.opRunScript(args);
+      case 'bgTimer':
+        return this.opBgTimer(args);
       default:
         throw new Error('unknown device op: ' + op);
     }
@@ -175,6 +177,18 @@ export class DeviceBridge {
       throw new Error('runScript: sandbox not initialized');
     }
     return await this.runScriptExecutor(source, timeoutMs);
+  }
+
+  /** 内核 bg_timer 的宿主定时器：ArkTS 真 setTimeout 延迟 seconds 后回包
+   *  （内核 finish 幂等，kill 后晚到的回包为 no-op） */
+  private opBgTimer(args: Record<string, Object>): Promise<Record<string, Object>> {
+    const seconds = Math.max(1, Math.min(600, Math.floor(numArg(args, 'seconds', 0))));
+    return new Promise<Record<string, Object>>((resolve) => {
+      setTimeout(() => {
+        const out: Record<string, Object> = { 'ok': true, 'seconds': seconds };
+        resolve(out);
+      }, seconds * 1000);
+    });
   }
 
   // ── status / permissions ───────────────────────────────────

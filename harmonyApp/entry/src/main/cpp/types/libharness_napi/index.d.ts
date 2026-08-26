@@ -16,6 +16,9 @@ export interface NativeCallbacks {
 /** 脚本沙箱 fetch 上行回调（ArkTS 执行 HTTP，完成后 scriptEngineFetchDone 下行结算） */
 export type ScriptFetchHandler = (fetchId: number, url: string, optionsJson: string) => void;
 
+/** 脚本沙箱定时器上行回调（ArkTS setTimeout 延迟 delayMs 后 scriptEngineTimerFire 下行回投） */
+export type ScriptTimerHandler = (timerId: number, delayMs: number) => void;
+
 // ── 主引擎（单例） ──
 
 export const init: (code: string, cwd: string, env: Record<string, string>, callbacks: NativeCallbacks) => void;
@@ -56,3 +59,9 @@ export const scriptEngineFetchDone: (engineId: number, fetchId: number, ok: bool
 
 /** 注册沙箱 fetch 处理器（重复注册覆盖旧的） */
 export const scriptEngineSetFetchHandler: (engineId: number, handler: ScriptFetchHandler) => void;
+
+/** 沙箱定时器到期下行：eval __sbFireTimer(timerId) 并推进事件循环（已 clear 的 id 静默跳过） */
+export const scriptEngineTimerFire: (engineId: number, timerId: number) => void;
+
+/** 注册沙箱定时器处理器（重复注册覆盖旧的；未注册时沙箱 setTimeout 永不触发） */
+export const scriptEngineSetTimerHandler: (engineId: number, handler: ScriptTimerHandler) => void;
