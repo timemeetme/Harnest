@@ -598,11 +598,17 @@ export class HarnessEngine {
         name: 'run_script',
         description: 'Execute a self-written JavaScript snippet in the host app\'s sandboxed JS engine. '
           + 'Use this when a task needs real computation instead of answering from memory: generating markdown/CSV/JSON reports, '
-          + 'batch text transformation, data extraction and aggregation, or fetching and parsing web pages. '
+          + 'batch text transformation, data extraction and aggregation, fetching and parsing web pages, or producing Office documents. '
           + 'Sandbox globals: fetch(url, {method, headers, body}) -> Promise<{status, ok, headers, text()}>, '
-          + 'readText(path), writeText(path, content) with paths relative to the app sandbox (e.g. "out/report.md"), '
+          + 'readText(path), writeText(path, content), readBytes(path) -> Uint8Array, writeBytes(path, bytes) '
+          + 'with paths relative to the app sandbox (e.g. "out/report.md", "out/summary.xlsx"), '
           + 'log(...parts) and console.log(...) to print; the script\'s return value is sent back as result. '
-          + 'Write large outputs to a file with writeText and return only a short summary. Default timeout 60s.',
+          + 'Prelude library is preloaded on globalThis.Prelude with pure-JS building blocks: '
+          + 'b64Encode/b64Decode, utf8Encode/utf8Decode, crc32, zipPack(entries)/zipUnpack(bytes), inflate, '
+          + 'makeXlsx({sheets:[{name, rows}]}), makeDocx({paragraphs}), makePptx({slides:[{title, bullets}]}), '
+          + 'readXlsx(bytes), readDocxText(bytes). Use Prelude.makeXlsx/makeDocx/makePptx to author real .xlsx/.docx/.pptx files '
+          + 'and writeBytes to save them; files written under the sandbox are listed back in the files field of the result. '
+          + 'Write large outputs to a file and return only a short summary. Default timeout 60s.',
         parameters: {
           code: { type: 'string', required: true, description: 'Self-contained JavaScript source (no imports). Plain ES2020; async/await supported.' },
           description: { type: 'string', required: true, description: 'One-line description of what this script does (shown on the tool card).' },
@@ -620,6 +626,11 @@ export class HarnessEngine {
               error: { type: 'string', description: 'Uncaught error message (present when ok is false).' },
               timedOut: { type: 'boolean', required: true },
               durationMs: { type: 'integer', required: true },
+              files: {
+                type: 'array',
+                description: 'Paths (relative to the sandbox root) of files written by the script via writeText/writeBytes during this run.',
+                items: { type: 'string' },
+              },
             },
           },
           render: (_args, value) => [{
