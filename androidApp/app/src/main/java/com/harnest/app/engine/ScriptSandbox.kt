@@ -24,7 +24,7 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * run_script 工具的 JS 沙箱宿主（独立于引擎线程的专用 QuickJS）：
  * - 每次运行全新 QuickJSContext（脚本间零共享），超时销毁后下次运行自动恢复
- * - 预置 runtime：log/console（64KB 环形 stdout）、fetch（OkHttp 异步桥）、readText/writeText
+ * - 预置 runtime：log/console（64KB 环形 stdout）、fetch（OkHttp 异步桥）、readText/writeText、setTimeout/setInterval（宿主 postDelayed 驱动）
  * - 文件访问锁死在 filesDir/scripts 内（canonicalPath 校验，逃逸即报错）
  * - runSync：Promise 包裹用户代码，CountDownLatch 等待 settle 或超时（默认上限 120s）
  * 桥函数遵循 FsBridge 约定：不抛 Java 异常 — read/write 错误以 \u0000 前缀哨兵串带回 JS 侧转 throw。
@@ -171,6 +171,12 @@ class ScriptSandbox private constructor(private val context: Context) {
         global.setProperty("__sbWriteB64", JSCallFunction { args ->
             sbWriteB64(args.getOrNull(0) as? String ?: "", args.getOrNull(1) as? String ?: "")
         })
+        global.setProperty("__sbTimerStart", JSCallFunction { args ->
+            val id = (args.getOrNull(0) as? Number)?.toInt() ?: 0
+            val ms = (args.getOrNull(1) as? Number)?.toLong() ?: 0L
+            startTimer(ctx, id, ms)
+            null
+        })
         global.setProperty("__sbSettle", JSCallFunction { args ->
             settleResult = args.getOrNull(0)?.toString() ?: "null"
             latch.countDown()
@@ -254,6 +260,12 @@ ${code}
     return true;
   };
 })();
+globalThis.__sb.timers = new Map(); globalThis.__sb.timerSeq = 1;
+globalThis.setTimeout = function(fn, ms){ var a = [].slice.call(arguments, 2); var id = __sb.timerSeq++; __sb.timers.set(id, function(){ fn.apply(null, a); }); __sbTimerStart(id, Math.max(0, Number(ms) || 0)); return id; };
+globalThis.clearTimeout = function(id){ __sb.timers.delete(id); };
+globalThis.setInterval = function(fn, ms){ var a = [].slice.call(arguments, 2); var id = __sb.timerSeq++; var period = Math.max(0, Number(ms) || 0); var tick = function(){ __sb.timers.set(id, tick); __sbTimerStart(id, period); fn.apply(null, a); }; __sb.timers.set(id, tick); __sbTimerStart(id, period); return id; };
+globalThis.clearInterval = globalThis.clearTimeout;
+globalThis.__sbFireTimer = function(id){ var f = __sb.timers.get(id); if (!f) return; __sb.timers.delete(id); f(); };
 """.trimIndent()
 
     // ── native 桥实现（不抛异常，错误经哨兵/settle 通道回传）──────
@@ -317,6 +329,19 @@ ${code}
                 Log.e(TAG, "fetch deliver failed: ${e.message}")
             }
         }
+    }
+
+    /** 定时器桥：延迟 ms 后回投 __sbFireTimer（注册时的 ctx 已销毁重建则静默跳过，防跨 run 误触发）。 */
+    private fun startTimer(ctxAtReg: QuickJSContext, id: Int, ms: Long) {
+        jsHandler.postDelayed({
+            val ctx = qjs ?: return@postDelayed
+            if (ctx !== ctxAtReg) return@postDelayed
+            try {
+                ctx.evaluate("__sbFireTimer($id)")
+            } catch (e: Throwable) {
+                Log.e(TAG, "timer deliver failed: ${e.message}")
+            }
+        }, ms)
     }
 
     /** 读写均限沙箱根内；返回 \u0000 前缀哨兵串 = 错误（JS 侧转 throw）。 */

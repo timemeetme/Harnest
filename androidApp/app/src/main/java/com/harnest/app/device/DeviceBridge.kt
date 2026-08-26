@@ -21,6 +21,7 @@ import com.harnest.app.engine.ScriptSandbox
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
@@ -140,6 +141,7 @@ class DeviceBridge(
             "scheduler" -> DeviceScheduler.op(context, args)
             "share" -> opShare(args)
             "runScript" -> opRunScript(args)
+            "bgTimer" -> opBgTimer(args)
             else -> JSONObject().put("ok", false).put("error", "unknown tool: $tool")
         }
     }
@@ -177,6 +179,14 @@ class DeviceBridge(
         val err = res["error"] as? String
         if (!err.isNullOrEmpty()) out.put("error", err)
         return out
+    }
+
+    /** 内核 bg_timer 的宿主定时器：延迟 seconds 后回包（每个 dispatch 独立协程，
+     *  delay 挂起不阻塞其他 op；内核 finish 幂等，kill 后晚到的回包为 no-op）。 */
+    private suspend fun opBgTimer(args: JSONObject): JSONObject {
+        val seconds = args.optLong("seconds", 0L).coerceIn(1L, 600L)
+        delay(seconds * 1_000L)
+        return JSONObject().put("ok", true).put("seconds", seconds)
     }
 
     private suspend fun opPermissions(args: JSONObject): JSONObject {
