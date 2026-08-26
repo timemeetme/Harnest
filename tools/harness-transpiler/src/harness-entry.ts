@@ -410,14 +410,31 @@ export class HarnessEngine {
       baseURL: profile.baseUrl,
       apiKeyEnv: credentialRef(envName),
       // 深度思考 wire 字段仅 DeepSeek 官方端点接受；Gemini 等严格 OpenAI 兼容层会以
-      // HTTP 400 拒绝未知顶层字段（Unknown name "thinking"），故非 deepseek 一律不发，
-      // effort 仍经 reasoning_effort 传递。
+      // HTTP 400 拒绝未知顶层字段（Unknown name "thinking"），故非 deepseek 一律不发
+      // wire 级 thinking。reasoning_effort 同样仅部分端点支持；在未经逐端验证前，
+      // 最保守策略是只给 deepseek 开 thinking wire 和 reasoning_effort，其他端点
+      // 默认关闭，后续验证兼容的端点（如官方 OpenAI、Claude）再单独打开。
+      // x-deepseek-harness-* 自定义头同理：Moonshot、Gemini 等网关对未知 header
+      // 会触发 401/400，白名单式分发。
       // Gemini 3.x 强制回传工具调用的 thought_signature；OpenAI 等严格端点会拒绝
-      // 未知字段，故仅 gemini 方言附加 extra_content。
-      defaults: {
-        emitThinking: name === 'deepseek',
-        toolCallExtras: name === 'gemini' ? 'google' : undefined,
-      },
+      // 未知字段，故仅 gemini 方言附加 extra_content（connection 级，不在 defaults）。
+      defaults: name === 'deepseek'
+        ? {
+            thinking: 'enabled',
+            emitWireThinking: true,
+            emitReasoningEffort: true,
+            emitHarnessHeaders: true,
+          }
+        : {
+            // 非 deepseek：保守默认，三开关全关，避免 400/401。
+            // thinking 语义层（非 wire）仍启用，使 reasoning 模式在宿主 UI 可选，
+            // 但 wire 上不发 thinking/reasoning_effort，由模型按默认策略决定。
+            emitWireThinking: false,
+            emitReasoningEffort: false,
+            emitHarnessHeaders: false,
+          },
+      // toolCallExtras 是 translateSSE 用的 dialect 选项，不在 RequestDefaults 里。
+      toolCallExtras: name === 'gemini' ? 'google' : undefined,
       maxTokens: profile.maxTokens ?? 8192,
       defaultContextWindow: profile.contextWindow ?? 65536,
       models: profile.models.map((m) => ({

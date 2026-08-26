@@ -274,10 +274,15 @@ final class HarnessEngine: @unchecked Sendable {
         }
         var raw: String?
         jsQueue.sync {
-            guard let ctx = self.context else { return }
+            guard let ctx = self.context else {
+                NSLog("callFunc(\(funcName)): context nil")
+                return
+            }
             let argsLiteral = jsonArgs.map { Self.jsStringLiteral($0) } ?? "''"
             let script = "JSON.stringify(globalThis.__harnessCall('\(funcName)', \(argsLiteral)))"
-            raw = ctx.evaluateScript(script)?.toString()
+            let result = ctx.evaluateScript(script)
+            if result == nil { NSLog("callFunc(\(funcName)): evaluateScript returned nil") }
+            raw = result?.toString()
         }
         guard let raw else {
             return CallEnvelope(isAsync: false, callId: -1, resultJson: nil, error: "js thread unavailable")

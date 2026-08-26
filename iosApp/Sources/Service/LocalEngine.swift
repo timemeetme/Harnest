@@ -141,14 +141,18 @@ final class LocalEngine {
 
     /// Provider catalog for the model picker.
     func listProviders() -> [[String: Any]] {
-        guard let eng = engineRef() else { return [] }
+        guard let eng = engineRef() else {
+            NSLog("listProviders: engineRef nil")
+            return []
+        }
         let envelope = eng.callFunc("listProviders", nil)
         guard let r = envelope.resultJson,
               let data = r.data(using: .utf8),
               let arr = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] else {
-            NSLog("listProviders parse failed: \(envelope.error ?? "?")")
+            NSLog("listProviders parse failed: error=\(envelope.error ?? "nil") resultJson=\(envelope.resultJson?.prefix(120) ?? "nil")")
             return []
         }
+        NSLog("listProviders ok: \(arr.count) providers")
         return arr
     }
 

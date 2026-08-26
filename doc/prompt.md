@@ -253,6 +253,16 @@
 |---|-------------------|----------|
 | 1 | 「更新远端代码；定位问题：现在模型验证都是提示 DeepSeek API stream from ...failed, 看不到详细报错原因。」 | `74cc1c4452` fix(all)：①stash→pull--ff-only→stash pop 合流远端 31 提交（内核 dsh-v0.1.1-rc.2/kimi-k3 迁移/low 档/沙箱定时器/fs tools/web_fetch/subagent），三端 Providers 冲突采用本地版本，鸿蒙 Constants.ets 冲突解决时选择本地版本导致 LEGACY_PRESET_MODELS 块被覆盖（远端 dd549acc7e 已添加，grep 引用链后补回）；②根因：agent.ts turn 收口 LlmError 分支取 frozen failure（无 cause）吞掉底层 401/HTTP 详情（陷阱 28）；③修复：内核 LlmFailure 加可选 `detail` 字段携带 errorChain，三端宿主 msg+detail 展示；④transpiler 重建三端 harness.js 同 SHA256（618069fb）；门禁 iOS build+XCTest 14/14、Android compileDebugKotlin |
 
+### 27. Kimi/Gemini 401/400 兼容修复（2026-08-26，M）
+
+| # | Prompt（逐字原文） | 进展状态 |
+|---|-------------------|----------|
+| 1 | 「测试kimi-k3，报错：invalid authentication；测试gemini-3.6，报错：deepseek api error（http 400）」 | 修复实施中：三端共用 OpenAI 兼容适配器泄漏了 DeepSeek 私有 wire 字段（thinking/reasoning_effort）与自定义头（x-deepseek-harness-user-id），导致 Gemini 400、Moonshot 401（陷阱 29）；已加 3 个开关并验证 3/3 通过（Node 模拟 fetch 抓包：moonshot/gemini 三嫌疑项 absent，deepseek baseline present）；三端 harness.js 重打包分发完成；待提交推送 |
+| 2 | 「而且报错后会同时导致另外2个现象：1. 底部的思考进度条卡住，不会自动停止：10.5k/65.5k 2. 此时点击顶部模型选择页面，二级页面看不到任何模型，页面为空」 | 调查中：①输入框可继续发送 → busy 状态正常复位，"卡住"是 Token 水位条（usageText）停在旧值（轻微 UI 表象）；②模型页为空：必现，iOS + 鸿蒙同现，但 glm-5.3 报错后仍能正常发消息 → 内核/callFunc 通路未死；怀疑是 listUsableProviders 过滤了 apiKey 为空的 provider 或 jsQueue 迟到事件导致 evaluateScript 返回 nil；iOS 侧 LocalEngine.swift 与 HarnessEngine.swift 已加诊断 NSLog 探针（listProviders/engineRef/callFunc evaluateScript），待真机复现后对照日志精确定位 |
+| 3 | 「当时模型选的是gemini-3.6 flash；卡住时的界面状态：输入框可以编辑、可以继续发送；用错误 Key 再触发一次 400/401，然后立刻进模型选择页，是必现；不知ios端，harmnyos端也是一样的问题，android暂时没测」 | 用户补充的关键复现条件；排除了 busy 死锁嫌疑，把模型页为空的嫌疑范围收窄到"listProviders 调用链"与"provider key 过滤" |
+| 4 | 「此时选glm-5.3 是正常的」 | 关键反例：证明内核没死、chat/callFunc 通路整体健康；模型页为空不是"引擎死"而是 listProviders 独立路径的问题 |
+| 5 | 「kimi的api key不会有问题，目前你就是在用着api key」 | 推翻了"kimi 401 是用户 key 错"的初步假设 → 重新定位，最终抓到 x-deepseek-harness-user-id 自定义头会被 Moonshot 网关作为鉴权干扰项回 401（真正的根因） |
+
 ---
 
 ## 二、当前项目进展汇总
