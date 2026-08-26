@@ -204,7 +204,13 @@
 | 4 | 「dsh(deepseek harness)有时会自建脚本完成一些任务，比如生成md、网络爬虫之类的，想办法在移动端支持这些脚本，比如使用quickjs，让内核完整潜力可以在移动端更好发挥出来，请问这部分代码有没有实现」 | 会话内口头答复（run_script 沙箱三端已 100% 实现），无代码提交 |
 | 5 | 「"无子进程/无 Node API" 有没有必要、可能性可以补齐」 | 调研结论：子进程死路；缺口 = 沙箱定时器 + TextEncoder/TextDecoder + bg_timer 空转，无代码提交 |
 | 6 | 「出一份实施方案（含三端改动点与验证方式）」 | 实施计划《沙箱定时器与运行时补齐》获批准，无代码提交 |
-| 7 | 「Implement the plan as specified, it is attached for your reference. Do NOT edit the plan file itself.」 | `0e45337533` feat(kernel) + `fd9697a069` feat(ios) + `d1b089379b` feat(android) + `4179395317` feat(harmony) + 本次 docs 收尾 |
+| 7 | 「Implement the plan as specified, it is attached for your reference. Do NOT edit the plan file itself.」 | `0e45337533` feat(kernel) + `fd9697a069` feat(ios) + `d1b089379b` feat(android) + `4179395317` feat(harmony) + `1789896ebe` docs 收尾 |
+
+### 20. 模型 ID 预设刷新批次（2026-08-26 晚，W，Qoder 会话）
+
+| # | Prompt（逐字原文） | 产出提交 |
+|---|-------------------|----------|
+| 1 | 「现在设置页面，国内外主流模型的设置是否与各家官方文档、最新模型ID匹配不上了？请检查后修复，我之前测试kimi-k3失败。」 | `2393579bf3` fix(all)：八家 provider 预设刷新至官方现役模型 ID（四份目录 + 三处 placeholder + 五处 fallback）+ 本次 docs 收尾 |
 
 ---
 
@@ -213,8 +219,8 @@
 ### 2.1 仓库状态
 
 - **仓库**：`git@github.com:timemeetme/Harnest.git`，主分支 `main`
-- **当前 HEAD**：`4179395317`（2026-08-26，沙箱定时器与运行时补齐批次；docs 收尾为本次提交）
-- **CI 状态**：三端全绿（HarmonyOS 2m46s / Android 3m28s / iOS 10m49s，4179395317 触发）
+- **当前 HEAD**：`2393579bf3`（2026-08-26，模型 ID 预设刷新批次；docs 收尾为本次提交）
+- **CI 状态**：三端全绿（HarmonyOS 2m54s / Android 3m39s / iOS 10m43s，2393579bf3 触发）
 - **双机开发**：Mac（SSH heavencme 协作者）+ Windows（https + gh CLI，需手动挂系统代理 127.0.0.1:7890）
 
 ### 2.2 架构总览
@@ -238,7 +244,7 @@ tools/harness-transpiler (TS 转译器，pnpm)
 - `harmonyApp/` — ArkTS + C++ QuickJS（`ScriptEngine.cpp`），hvigor 构建
 - `shared/` — KMP 共享模块，iOS 产物为 XCFramework（CI 对齐产物）
 
-### 2.3 里程碑一览（79 笔提交，含本次 docs 收尾）
+### 2.3 里程碑一览（81 笔提交，含本次 docs 收尾）
 
 | 日期 | 里程碑 | 关键提交 |
 |------|--------|----------|
@@ -257,6 +263,7 @@ tools/harness-transpiler (TS 转译器，pnpm)
 | 08-26 | Tier B Review + resolvePath 修复 | `53315ce2e0` |
 | 08-26 | OOXML 沙箱扩展（prelude.js + 三端 b64 桥 + CI 全绿） | `c6ceeca620` 等 7 笔 |
 | 08-26 | 沙箱定时器三端 + bg_timer 修复 + TextEncoder/TextDecoder | `0e45337533`…`4179395317` |
+| 08-26 | 八家 provider 预设刷新至官方现役模型 ID（kimi-k3/deepseek-v4/glm-5.3/gpt-5.6 等） | `2393579bf3` |
 
 ### 2.4 三端功能矩阵（当前状态）
 
@@ -355,6 +362,7 @@ xcodebuild test  -project Harnest.xcodeproj -scheme Harnest -destination 'platfo
 - **OOXML 真机实测**（Prelude.makeXlsx/makeDocx/makePptx 生成文件：writeBytes 落盘 + files 字段回传 + readXlsx/readDocxText 回读，三端各验一轮）
 - **真机·沙箱定时器**（让模型跑 `run_script`：`const t0=Date.now(); await new Promise(r=>setTimeout(r,500)); return Date.now()-t0` 应返回 ≥500 且 <2000；clearTimeout 用例不触发）
 - **真机·bg_timer**（让模型「启动一个 15 秒后台计时器」：后台任务卡应 15s 后从 running → completed——修复前永久 running）
+- **真机·kimi-k3 打通**（新预设选 Kimi/kimi-k3 发一轮对话应正常回复——修复前预设三个 k2 模型均已官方下线；其余七家新默认模型各抽验一轮；存量会话若保存了 deepseek-chat 等已停用 ID 需手动改选）
 
 ---
 
