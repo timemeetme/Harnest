@@ -263,6 +263,12 @@
 | 4 | 「此时选glm-5.3 是正常的」 | 关键反例：证明内核没死、chat/callFunc 通路整体健康；模型页为空不是"引擎死"而是 listProviders 独立路径的问题 |
 | 5 | 「kimi的api key不会有问题，目前你就是在用着api key」 | 推翻了"kimi 401 是用户 key 错"的初步假设 → 重新定位，最终抓到 x-deepseek-harness-user-id 自定义头会被 Moonshot 网关作为鉴权干扰项回 401（真正的根因） |
 
+### 27. 更新代码批次（2026-08-26，W）
+
+| # | Prompt（逐字原文） | 产出提交 |
+|---|-------------------|----------|
+| 1 | 「更新代码」 | fetch 发现远端 Mac+Qoder 并行推 10 笔 → fast-forward 合流 + 三端 harness.js SHA256 一致验证 + Android/鸿蒙本地门禁 ✅ + CI dc2e4a93f5 鸿蒙+iOS ✅（记忆更新，本次提交） |
+
 ---
 
 ## 二、当前项目进展汇总
